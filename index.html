@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="description" content="Pokémon-artiges Browser-Spiel im Game-Boy-Color-Stil — alle 151 Gen-1-Pokémon, Kämpfe, Fangen, Pokédex.">
+  <meta name="theme-color" content="#3a3052">
+  <title>Pokémon GBC Edition</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+  <div id="device">
+    <div id="screen-bezel">
+      <div id="screen-wrap">
+        <canvas id="screen" width="160" height="144"></canvas>
+      </div>
+    </div>
+
+    <!-- On-Screen-Steuerung (nur auf Touch-Geräten sichtbar) -->
+    <div id="controls">
+      <div id="dpad">
+        <div></div><button class="pad" data-btn="up">▲</button><div></div>
+        <button class="pad" data-btn="left">◀</button><div class="pad-center"></div><button class="pad" data-btn="right">▶</button>
+        <div></div><button class="pad" data-btn="down">▼</button><div></div>
+      </div>
+      <div id="ab">
+        <button class="round" data-btn="b">B</button>
+        <button class="round" data-btn="a">A</button>
+      </div>
+    </div>
+
+    <footer>© 2026 Martin Pfeffer | celox.io</footer>
+  </div>
+
+  <!-- ?v=2 erzwingt frischen Cache nach dem grossen Welt-/Evolutions-Update -->
+  <script src="js/data.js?v=2"></script>
+  <script src="js/ui.js?v=2"></script>
+  <script src="js/battle.js?v=2"></script>
+  <script src="js/world.js?v=2"></script>
+  <script src="js/main.js?v=2"></script>
+</body>
+</html>

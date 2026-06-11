@@ -1,0 +1,104 @@
+/* Pokémon GBC Edition — Geräte-Rahmen + pixel-perfekte Skalierung */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  background: #1a1626;
+  overflow: hidden;
+  font-family: "Press Start 2P", monospace;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#device {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* dezenter GBC-Shell-Look */
+  background: linear-gradient(160deg, #463a6b 0%, #3a3052 60%, #2d2540 100%);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+#screen-bezel {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+}
+
+#screen-wrap {
+  flex: 1;
+  min-height: 0;
+  min-width: 0; /* Flex-Item darf unter Canvas-Breite schrumpfen (Mobile!) */
+  max-width: 900px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+canvas#screen {
+  background: #181818;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  border: 6px solid #14101e;
+  border-radius: 6px;
+  box-shadow: 0 0 0 3px #5a4d85, 0 8px 28px rgba(0, 0, 0, .55);
+}
+
+/* ---------------- Touch-Steuerung ---------------- */
+#controls {
+  display: none;
+  width: 100%;
+  max-width: 480px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 22px 14px;
+  touch-action: none;
+}
+body.touch #controls { display: flex; }
+
+#dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 46px);
+  grid-template-rows: repeat(3, 46px);
+}
+.pad {
+  background: #221d33;
+  border: 2px solid #14101e;
+  color: #8d80b8;
+  font-size: 14px;
+  border-radius: 8px;
+  touch-action: none;
+}
+.pad-center { background: #221d33; border: 2px solid #14101e; }
+
+#ab { display: flex; gap: 18px; align-items: flex-end; }
+.round {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: #a32638;
+  border: 3px solid #14101e;
+  color: #f3dce0;
+  font-family: inherit;
+  font-size: 16px;
+  box-shadow: 0 3px 0 #6e1825;
+  touch-action: none;
+}
+.round[data-btn="b"] { margin-top: 26px; }
+
+.pad.active, .round.active { filter: brightness(1.45); transform: translateY(1px); }
+
+footer {
+  color: #6e628f;
+  font-size: 8px;
+  padding: 6px 0 10px;
+  letter-spacing: 1px;
+}
