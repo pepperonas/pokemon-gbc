@@ -180,18 +180,20 @@ const UI = (() => {
   // ------------------------------------------------------- Pausenmenü ---
   class PauseMenuScreen {
     constructor() {
-      this.items = ['TEAM', 'POKEDEX', 'BOX', 'SPEICHERN', 'ZURUECK'];
+      this.items = ['TEAM', 'BEUTEL', 'POKEDEX', 'BOX', 'SPEICHERN', 'ZURUECK'];
       this.index = 0; this.toast = 0;
     }
     update(dt) {
       if (this.toast > 0) { this.toast -= dt; return; }
       const n = this.items.length;
-      if (Input.take('up'))   this.index = (this.index + n - 1) % n;
-      if (Input.take('down')) this.index = (this.index + 1) % n;
+      if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
+      if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
       if (Input.take('b')) { Game.pop(); return; }
       if (Input.take('a')) {
+        Sound.confirm();
         switch (this.items[this.index]) {
           case 'TEAM':      Game.push(new TeamScreen()); break;
+          case 'BEUTEL':    Game.push(new ItemScreen()); break;
           case 'POKEDEX':   Game.push(new DexScreen()); break;
           case 'BOX':       Game.push(new BoxScreen()); break;
           case 'SPEICHERN': Game.save(); this.toast = 1200; break;
@@ -201,19 +203,155 @@ const UI = (() => {
     }
     draw(ctx) {
       const p = Game.player;
-      box(ctx, 58, 4, 98, 112);
+      box(ctx, 58, 2, 98, 116);
       this.items.forEach((it, i) => {
-        text(ctx, it, 78, 12 + i * 12);
-        if (i === this.index) text(ctx, '>', 68, 12 + i * 12);
+        text(ctx, it, 78, 9 + i * 11);
+        if (i === this.index) text(ctx, '>', 68, 9 + i * 11);
       });
-      // Statuszeilen: Orden + Vorräte
-      ctx.fillStyle = INK; ctx.fillRect(66, 74, 82, 1);
-      text(ctx, `ORDEN ${p.badges || 0}/2`, 68, 80);
-      text(ctx, `BALL  x${p.balls}`, 68, 92);
-      text(ctx, `TRANK x${p.potions || 0}`, 68, 104);
+      // Statuszeilen: Geld + Orden
+      ctx.fillStyle = INK; ctx.fillRect(66, 78, 82, 1);
+      text(ctx, `$${p.money || 0}`, 68, 86);
+      text(ctx, `ORDEN ${p.badges || 0}/2`, 68, 100);
       if (this.toast > 0) {
         box(ctx, 16, 120, 128, 24);
         text(ctx, 'Gespeichert!', 36, 128);
+      }
+    }
+  }
+
+  // ------------------------------------------------------ Beutel (Items) ---
+  class ItemScreen {
+    constructor() { this.index = 0; this.pick = null; this.note = null; }
+    list() { return Data.ITEM_ORDER.filter(k => (Game.player.items[k] || 0) > 0); }
+    flash(t) { this.note = { text: t, t: 1100 }; }
+
+    /** Item auf ein Team-Mitglied anwenden. Liefert true bei Erfolg. */
+    apply(mon, key) {
+      const it = Data.ITEMS[key];
+      if (it.kind === 'heal') {
+        if (mon.hp <= 0) { this.flash(`${mon.name} ist K.O.! Nutze BELEBER.`); return false; }
+        if (mon.hp >= mon.stats.hp) { this.flash(`${mon.name} hat volle KP!`); return false; }
+        mon.hp = Math.min(mon.stats.hp, mon.hp + it.amount);
+        Game.player.items[key]--;
+        Sound.heal();
+        this.flash(`${mon.name} wurde geheilt!`);
+        return true;
+      }
+      if (it.kind === 'revive') {
+        if (mon.hp > 0) { this.flash(`${mon.name} ist nicht K.O.!`); return false; }
+        mon.hp = Math.floor(mon.stats.hp / 2);
+        mon.status = null;
+        Game.player.items[key]--;
+        Sound.heal();
+        this.flash(`${mon.name} wurde wiederbelebt!`);
+        return true;
+      }
+      if (it.kind === 'cure') {
+        if (!mon.status) { this.flash(`${mon.name} ist gesund!`); return false; }
+        mon.status = null;
+        Game.player.items[key]--;
+        Sound.heal();
+        this.flash(`${mon.name} ist wieder gesund!`);
+        return true;
+      }
+      return false;
+    }
+
+    update(dt) {
+      if (this.note && (this.note.t -= dt) <= 0) this.note = null;
+      const items = this.list();
+      if (this.pick) {                       // Team-Mitglied wählen
+        const n = Game.player.party.length;
+        if (Input.take('up'))   { this.pick.index = (this.pick.index + n - 1) % n; Sound.cursor(); }
+        if (Input.take('down')) { this.pick.index = (this.pick.index + 1) % n; Sound.cursor(); }
+        if (Input.take('b')) { this.pick = null; return; }
+        if (Input.take('a')) {
+          if (this.apply(Game.player.party[this.pick.index], this.pick.key)) this.pick = null;
+        }
+        return;
+      }
+      if (Input.take('b')) { Game.pop(); return; }
+      if (!items.length) { if (Input.take('a')) Game.pop(); return; }
+      this.index = Math.min(this.index, items.length - 1);
+      const n = items.length;
+      if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
+      if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
+      if (Input.take('a')) {
+        const key = items[this.index];
+        if (Data.ITEMS[key].kind === 'ball') this.flash('Baelle sind nur im Kampf nutzbar!');
+        else { Sound.confirm(); this.pick = { key, index: 0 }; }
+      }
+    }
+
+    draw(ctx) {
+      ctx.fillStyle = CREAM; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'BEUTEL', 8, 6);
+      text(ctx, `$${Game.player.money || 0}`, 104, 6);
+      const items = this.list();
+      if (!items.length) { text(ctx, 'Der Beutel ist leer.', 12, 64); }
+      const scroll = Math.max(0, Math.min(this.index - 4, items.length - 8));
+      items.slice(scroll, scroll + 8).forEach((k, i) => {
+        const gi = scroll + i, y = 22 + i * 13;
+        if (gi === this.index) text(ctx, '>', 2, y);
+        text(ctx, Data.ITEMS[k].name, 12, y);
+        text(ctx, 'x' + Game.player.items[k], 124, y);
+      });
+      if (this.pick) {
+        box(ctx, 8, 8, 144, 100);
+        text(ctx, Data.ITEMS[this.pick.key].name + ' auf wen?', 16, 16);
+        Game.player.party.forEach((m, i) => {
+          const y = 30 + i * 12;
+          if (i === this.pick.index) text(ctx, '>', 18, y);
+          text(ctx, m.name.toUpperCase(), 28, y);
+          text(ctx, m.hp <= 0 ? 'K.O.' : `${m.hp}/${m.stats.hp}`, 104, y);
+        });
+      }
+      if (this.note) {
+        box(ctx, 4, 116, 152, 26);
+        textWrapped(ctx, this.note.text, 10, 124, 18);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------- Markt ---
+  class MartScreen {
+    constructor(tier) {
+      this.goods = Data.MART_TIERS[tier] || Data.MART_TIERS[1];
+      this.index = 0; this.note = null;
+    }
+    flash(t) { this.note = { text: t, t: 1000 }; }
+    update(dt) {
+      if (this.note && (this.note.t -= dt) <= 0) this.note = null;
+      const n = this.goods.length + 1;       // + ZURUECK
+      if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
+      if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
+      if (Input.take('b')) { Game.pop(); return; }
+      if (Input.take('a')) {
+        if (this.index === this.goods.length) { Game.pop(); return; }
+        const key = this.goods[this.index], it = Data.ITEMS[key];
+        if ((Game.player.money || 0) < it.price) { this.flash('Zu wenig Geld!'); return; }
+        Game.player.money -= it.price;
+        Game.player.items[key] = (Game.player.items[key] || 0) + 1;
+        Sound.confirm();
+        this.flash(`${it.name} gekauft!`);
+      }
+    }
+    draw(ctx) {
+      ctx.fillStyle = CREAM; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'MARKT', 8, 6);
+      text(ctx, `$${Game.player.money || 0}`, 100, 6);
+      this.goods.forEach((k, i) => {
+        const y = 22 + i * 12, it = Data.ITEMS[k];
+        if (i === this.index) text(ctx, '>', 2, y);
+        text(ctx, it.name, 12, y);
+        text(ctx, '$' + it.price, 112, y);
+      });
+      const yb = 22 + this.goods.length * 12;
+      if (this.index === this.goods.length) text(ctx, '>', 2, yb);
+      text(ctx, 'ZURUECK', 12, yb);
+      if (this.note) {
+        box(ctx, 4, 116, 152, 26);
+        textWrapped(ctx, this.note.text, 10, 124, 18);
       }
     }
   }
@@ -269,7 +407,8 @@ const UI = (() => {
         if (i === this.swapFrom) text(ctx, '*', 2, y);
         if (i === this.index) text(ctx, '>', 2, y);
         text(ctx, m.name.toUpperCase(), 12, y);
-        text(ctx, 'L' + m.level, 116, y);
+        if (m.status) text(ctx, Data.STATUS_DE[m.status], 116, y, Data.STATUS_COLORS[m.status]);
+        else text(ctx, 'L' + m.level, 116, y);
         hpBar(ctx, 14, y + 10, 100, m.hp, m.stats.hp);
         text(ctx, `${m.hp}/${m.stats.hp}`, 118, y + 8);
       });
@@ -291,6 +430,7 @@ const UI = (() => {
     else Data.drawPlaceholder(ctx, m.species, 4, 4, 56);
     text(ctx, m.name.toUpperCase(), 64, 8);
     text(ctx, ':L' + m.level, 64, 18);
+    if (m.status) text(ctx, Data.STATUS_DE[m.status], 110, 18, Data.STATUS_COLORS[m.status]);
     text(ctx, m.species.types.map(t => Data.TYPE_DE[t]).join('/'), 64, 28);
     text(ctx, `KP ${m.hp}/${m.stats.hp}`, 64, 40);
     text(ctx, `EXP ${m.exp}`, 64, 50);
@@ -396,6 +536,6 @@ const UI = (() => {
   return {
     text, textWrapped, box, hpBar, drawSilhouette, drawMonDetail,
     LoadingScreen, TitleScreen, StarterScreen, PauseMenuScreen,
-    TeamScreen, BoxScreen, DexScreen,
+    TeamScreen, BoxScreen, DexScreen, ItemScreen, MartScreen,
   };
 })();

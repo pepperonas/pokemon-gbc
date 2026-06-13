@@ -1,11 +1,14 @@
 'use strict';
 /**
- * data.js — Laden & Cachen der 151 Gen-1-Pokémon von der PokeAPI.
+ * data.js — Bereitstellen der 151 Gen-1-Pokémon (offline-fähig).
  *
- * - Beim ersten Start werden alle 151 Pokémon geladen (Name, Typen, Base Stats,
- *   Base-EXP, Sprite-URLs) und schlank in localStorage gecacht.
- * - Sprites werden NICHT als Base64 gecacht (localStorage-Quota), sondern zur
- *   Laufzeit per URL geladen — der Browser-HTTP-Cache übernimmt das Caching.
+ * - Standard: gebündelter Pokédex aus js/pokedex.js (window.POKEDEX) inkl.
+ *   lokaler Sprite-Pfade (assets/sprites/<id>f.png / <id>b.png). Damit läuft
+ *   das Spiel komplett ohne Netzwerk — auch wenn pokeapi.co / GitHub down sind.
+ *   Das Bundle wird per `node tools/fetch-pokedex.js` neu generiert.
+ * - Fallback (falls Bundle fehlt): localStorage-Cache einer früheren Online-
+ *   Erstladung, sonst Live-Abfrage der PokeAPI (Sprites dann per Remote-URL).
+ * - Sprites werden zur Laufzeit lazy als Image geladen (kein Base64-Cache).
  * - Deutsche Namen sind hart kodiert (erspart 151 zusätzliche species-Requests).
  * - Movesets: kuratierter, typgerechter Move-Pool (Gen-1-Werte, kleine
  *   Abkürzungen sind kommentiert) statt 151 weiterer API-Abfragen.
@@ -51,28 +54,52 @@ const Data = (() => {
   };
 
   /**
-   * Kuratierter Move-Pool pro Typ (Gen-1-Power/Accuracy) mit Lern-Level `l`.
-   * Beim Level-Up werden stärkere Attacken freigeschaltet (max. 4 Slots).
-   * Abkürzungen: kein PP-System, keine Status-Moves, "Nachtnebel" & "Drachenwut"
-   * (eigentlich Fix-Schaden) sind hier als normale Power-Moves vereinfacht.
+   * Kuratierter Move-Pool pro Typ (Gen-1-Power/Accuracy) mit Lern-Level `l`
+   * und optionalem Status-Nebeneffekt `fx: { s: psn|brn|par|frz, c: %Chance }`
+   * (Gen-1-nahe Werte: Bodyslam 30% PAR, Lecker 30% PAR, Feuer 10% BRN …).
+   * Abkürzungen: kein PP-System, "Nachtnebel" & "Drachenwut" (eigentlich
+   * Fix-Schaden) sind hier als normale Power-Moves vereinfacht.
    */
   const MOVE_POOL = {
-    normal:   [{ n: 'Tackle', p: 35, a: 95, l: 1 }, { n: 'Kratzer', p: 40, a: 100, l: 10 }, { n: 'Bodyslam', p: 85, a: 100, l: 22 }, { n: 'Hyperstrahl', p: 150, a: 90, l: 35 }],
-    fire:     [{ n: 'Glut', p: 40, a: 100, l: 1 }, { n: 'Feuerzahn', p: 65, a: 95, l: 10 }, { n: 'Flammenwurf', p: 95, a: 100, l: 22 }, { n: 'Feuersturm', p: 120, a: 85, l: 35 }],
+    normal:   [{ n: 'Tackle', p: 35, a: 95, l: 1 }, { n: 'Kratzer', p: 40, a: 100, l: 10 }, { n: 'Bodyslam', p: 85, a: 100, l: 22, fx: { s: 'par', c: 30 } }, { n: 'Hyperstrahl', p: 150, a: 90, l: 35 }],
+    fire:     [{ n: 'Glut', p: 40, a: 100, l: 1, fx: { s: 'brn', c: 10 } }, { n: 'Feuerzahn', p: 65, a: 95, l: 10, fx: { s: 'brn', c: 10 } }, { n: 'Flammenwurf', p: 95, a: 100, l: 22, fx: { s: 'brn', c: 10 } }, { n: 'Feuersturm', p: 120, a: 85, l: 35, fx: { s: 'brn', c: 10 } }],
     water:    [{ n: 'Aquaknarre', p: 40, a: 100, l: 1 }, { n: 'Blubbstrahl', p: 65, a: 100, l: 10 }, { n: 'Surfer', p: 95, a: 100, l: 22 }, { n: 'Hydropumpe', p: 120, a: 80, l: 35 }],
     grass:    [{ n: 'Rankenhieb', p: 35, a: 100, l: 1 }, { n: 'Rasierblatt', p: 55, a: 95, l: 10 }, { n: 'Blattgewirbel', p: 80, a: 100, l: 22 }, { n: 'Solarstrahl', p: 120, a: 100, l: 35 }],
-    electric: [{ n: 'Donnerschock', p: 40, a: 100, l: 1 }, { n: 'Funkensprung', p: 65, a: 100, l: 10 }, { n: 'Donnerblitz', p: 95, a: 100, l: 22 }, { n: 'Donner', p: 120, a: 70, l: 35 }],
-    ice:      [{ n: 'Eisschauer', p: 40, a: 100, l: 1 }, { n: 'Aurorastrahl', p: 65, a: 100, l: 10 }, { n: 'Eisstrahl', p: 95, a: 100, l: 22 }, { n: 'Blizzard', p: 120, a: 90, l: 35 }],
+    electric: [{ n: 'Donnerschock', p: 40, a: 100, l: 1, fx: { s: 'par', c: 10 } }, { n: 'Funkensprung', p: 65, a: 100, l: 10, fx: { s: 'par', c: 30 } }, { n: 'Donnerblitz', p: 95, a: 100, l: 22, fx: { s: 'par', c: 10 } }, { n: 'Donner', p: 120, a: 70, l: 35, fx: { s: 'par', c: 10 } }],
+    ice:      [{ n: 'Eisschauer', p: 40, a: 100, l: 1, fx: { s: 'frz', c: 10 } }, { n: 'Aurorastrahl', p: 65, a: 100, l: 10 }, { n: 'Eisstrahl', p: 95, a: 100, l: 22, fx: { s: 'frz', c: 10 } }, { n: 'Blizzard', p: 120, a: 90, l: 35, fx: { s: 'frz', c: 10 } }],
     fighting: [{ n: 'Fusstritt', p: 50, a: 90, l: 1 }, { n: 'Karateschlag', p: 50, a: 100, l: 10 }, { n: 'Ueberroller', p: 80, a: 80, l: 22 }, { n: 'Hochkick', p: 85, a: 90, l: 35 }],
-    poison:   [{ n: 'Giftstachel', p: 15, a: 100, l: 1 }, { n: 'Saeure', p: 40, a: 100, l: 10 }, { n: 'Schlamm', p: 65, a: 100, l: 22 }, { n: 'Giftschock', p: 90, a: 100, l: 35 }],
+    poison:   [{ n: 'Giftstachel', p: 15, a: 100, l: 1, fx: { s: 'psn', c: 30 } }, { n: 'Saeure', p: 40, a: 100, l: 10 }, { n: 'Schlamm', p: 65, a: 100, l: 22, fx: { s: 'psn', c: 40 } }, { n: 'Giftschock', p: 90, a: 100, l: 35, fx: { s: 'psn', c: 40 } }],
     ground:   [{ n: 'Sandgrab', p: 35, a: 90, l: 1 }, { n: 'Knochenkeule', p: 65, a: 85, l: 10 }, { n: 'Schaufler', p: 100, a: 100, l: 22 }, { n: 'Erdbeben', p: 100, a: 100, l: 35 }],
     flying:   [{ n: 'Windstoss', p: 40, a: 100, l: 1 }, { n: 'Fluegelschlag', p: 60, a: 100, l: 10 }, { n: 'Bohrschnabel', p: 80, a: 100, l: 22 }, { n: 'Himmelsfeger', p: 140, a: 90, l: 35 }],
     psychic:  [{ n: 'Konfusion', p: 50, a: 100, l: 1 }, { n: 'Psystrahl', p: 65, a: 100, l: 10 }, { n: 'Psychokinese', p: 90, a: 100, l: 22 }, { n: 'Traumfresser', p: 100, a: 100, l: 35 }],
-    bug:      [{ n: 'Duonadel', p: 25, a: 100, l: 1 }, { n: 'Kaeferbiss', p: 60, a: 100, l: 10 }, { n: 'Anfallspin', p: 75, a: 95, l: 22 }, { n: 'Megasauger', p: 80, a: 100, l: 35 }],
+    bug:      [{ n: 'Duonadel', p: 25, a: 100, l: 1, fx: { s: 'psn', c: 20 } }, { n: 'Kaeferbiss', p: 60, a: 100, l: 10 }, { n: 'Anfallspin', p: 75, a: 95, l: 22 }, { n: 'Megasauger', p: 80, a: 100, l: 35 }],
     rock:     [{ n: 'Steinwurf', p: 50, a: 65, l: 1 }, { n: 'Steinhagel', p: 75, a: 90, l: 10 }, { n: 'Felsbrecher', p: 90, a: 90, l: 22 }, { n: 'Steinkante', p: 100, a: 80, l: 35 }],
-    ghost:    [{ n: 'Lecker', p: 20, a: 100, l: 1 }, { n: 'Nachtnebel', p: 60, a: 100, l: 10 }, { n: 'Schattenstoss', p: 80, a: 100, l: 22 }, { n: 'Spuksturm', p: 95, a: 95, l: 35 }],
-    dragon:   [{ n: 'Drachenwut', p: 50, a: 100, l: 1 }, { n: 'Drachenatem', p: 60, a: 100, l: 10 }, { n: 'Drachenstoss', p: 85, a: 95, l: 22 }, { n: 'Drachenpuls', p: 100, a: 100, l: 35 }],
+    ghost:    [{ n: 'Lecker', p: 20, a: 100, l: 1, fx: { s: 'par', c: 30 } }, { n: 'Nachtnebel', p: 60, a: 100, l: 10 }, { n: 'Schattenstoss', p: 80, a: 100, l: 22 }, { n: 'Spuksturm', p: 95, a: 95, l: 35 }],
+    dragon:   [{ n: 'Drachenwut', p: 50, a: 100, l: 1 }, { n: 'Drachenatem', p: 60, a: 100, l: 10, fx: { s: 'par', c: 30 } }, { n: 'Drachenstoss', p: 85, a: 95, l: 22 }, { n: 'Drachenpuls', p: 100, a: 100, l: 35 }],
   };
+
+  // ------------------------------------------------------------- Items ---
+  // Katalog aller Items (Märkte, Kampf- und Beutel-Menü).
+  const ITEMS = {
+    ball:        { name: 'POKEBALL',   price: 200,  kind: 'ball', mult: 1 },
+    greatball:   { name: 'SUPERBALL',  price: 600,  kind: 'ball', mult: 1.5 },
+    ultraball:   { name: 'HYPERBALL',  price: 1200, kind: 'ball', mult: 2 },
+    potion:      { name: 'TRANK',      price: 300,  kind: 'heal', amount: 20 },
+    superpotion: { name: 'SUPERTRANK', price: 700,  kind: 'heal', amount: 50 },
+    hyperpotion: { name: 'HYPERTRANK', price: 1500, kind: 'heal', amount: 200 },
+    revive:      { name: 'BELEBER',    price: 1500, kind: 'revive' },
+    fullheal:    { name: 'HEILER',     price: 600,  kind: 'cure' },
+  };
+  const ITEM_ORDER = ['ball', 'greatball', 'ultraball', 'potion', 'superpotion', 'hyperpotion', 'revive', 'fullheal'];
+  // Sortiment je Markt-Stufe
+  const MART_TIERS = {
+    1: ['ball', 'potion'],
+    2: ['ball', 'greatball', 'potion', 'superpotion', 'revive'],
+    3: ['ball', 'greatball', 'ultraball', 'potion', 'superpotion', 'hyperpotion', 'revive', 'fullheal'],
+  };
+  // Status-Kürzel für Anzeigen
+  const STATUS_DE = { psn: 'GIF', brn: 'BRN', par: 'PAR', frz: 'EIS' };
+  const STATUS_COLORS = { psn: '#a040a0', brn: '#f08030', par: '#f8b800', frz: '#5090e8' };
 
   let pokemon = [];          // 1-basiert: pokemon[1] = Bisasam …
   const imgCache = {};       // url -> { img, ok }
@@ -99,8 +126,21 @@ const Data = (() => {
     };
   }
 
-  /** Alle 151 laden — aus Cache oder per API (8 parallele Worker + Fortschritt). */
+  /**
+   * Alle 151 laden — Priorität:
+   *   1. Gebündelter Pokédex (js/pokedex.js → window.POKEDEX) inkl. lokaler
+   *      Sprite-Pfade: voll offline-fähig, kein Netzwerk nötig.
+   *   2. localStorage-Cache (frühere Online-Erstladung, alte Spielstände).
+   *   3. Fallback: PokeAPI live abfragen (8 parallele Worker + Fortschritt).
+   */
   async function load(onProgress) {
+    // 1) Gebündelte Daten — bevorzugt (auch wenn die API down ist)
+    if (typeof window !== 'undefined' && Array.isArray(window.POKEDEX) && window.POKEDEX[COUNT]) {
+      pokemon = window.POKEDEX;
+      onProgress(1);
+      return;
+    }
+    // 2) localStorage-Cache
     try {
       const cached = localStorage.getItem(CACHE_KEY);
       if (cached) {
@@ -148,7 +188,7 @@ const Data = (() => {
     for (const t of species.types) {
       const pool = (MOVE_POOL[t] || MOVE_POOL.normal).filter(m => m.l <= level);
       for (const m of pool.slice(-perType)) {
-        moves.push({ name: m.n, type: t, power: m.p, acc: m.a });
+        moves.push({ name: m.n, type: t, power: m.p, acc: m.a, fx: m.fx });
       }
     }
     if (moves.length < 4 && !moves.some(m => m.type === 'normal')) {
@@ -222,6 +262,7 @@ const Data = (() => {
   return {
     load, movesFor, sprite, drawPlaceholder,
     TYPE_DE, TYPE_COLORS, COUNT,
+    ITEMS, ITEM_ORDER, MART_TIERS, STATUS_DE, STATUS_COLORS,
     get pokemon() { return pokemon; },
     byId(id) { return pokemon[id]; },
   };

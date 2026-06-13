@@ -58,11 +58,14 @@ const Game = {
 
   newPlayer() {
     return {
-      party: [], box: [], balls: 10, potions: 3,
+      party: [], box: [],
+      items: { ball: 10, potion: 3 },       // Beutel (Schlüssel s. Data.ITEMS)
+      money: 1500,
       badges: 0, flags: {},                 // Trainer-/Arena-/Champion-/Legendären-Flags
       seen: new Set(), caught: new Set(),
+      map: 'overworld',
       x: World.START.x, y: World.START.y, dir: 'up',
-      respawn: { x: World.START.x, y: World.START.y },
+      respawn: { map: 'overworld', x: World.START.x, y: World.START.y },
     };
   },
 
@@ -79,31 +82,37 @@ const Game = {
   save() {
     const p = this.player;
     if (!p) return;
-    const packMon = m => ({ id: m.id, level: m.level, exp: m.exp, hp: m.hp });
+    const packMon = m => ({ id: m.id, level: m.level, exp: m.exp, hp: m.hp, status: m.status || null });
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       party: p.party.map(packMon),
       box: p.box.map(packMon),
-      balls: p.balls, potions: p.potions ?? 3,
+      items: p.items, money: p.money ?? 0,
       badges: p.badges ?? 0, flags: p.flags || {},
       seen: [...p.seen], caught: [...p.caught],
+      map: p.map || 'overworld',
       x: p.x, y: p.y, dir: p.dir,
-      respawn: p.respawn || { x: World.START.x, y: World.START.y },
+      respawn: p.respawn || { map: 'overworld', x: World.START.x, y: World.START.y },
     }));
   },
 
   continueGame() {
     try {
       const s = JSON.parse(localStorage.getItem(SAVE_KEY));
+      // Migration alter Spielstände: balls/potions -> items, Geld-Startkapital
+      const items = s.items || { ball: s.balls ?? 10, potion: s.potions ?? 3 };
+      const respawn = s.respawn || { x: World.START.x, y: World.START.y };
+      if (!respawn.map) respawn.map = 'overworld';
       this.player = {
         party: s.party.map(Battle.restoreMon),
         box: (s.box || []).map(Battle.restoreMon),
-        balls: s.balls ?? 10,
-        potions: s.potions ?? 3,             // Defaults: alte Spielstände (v1) bleiben gültig
+        items,
+        money: s.money ?? 1500,
         badges: s.badges ?? 0,
         flags: s.flags || {},
         seen: new Set(s.seen), caught: new Set(s.caught),
+        map: s.map || 'overworld',
         x: s.x, y: s.y, dir: s.dir || 'up',
-        respawn: s.respawn || { x: World.START.x, y: World.START.y },
+        respawn,
       };
       this.screens = [new World.WorldScreen()];
     } catch (e) {
@@ -119,10 +128,18 @@ const Game = {
   const canvas = document.getElementById('screen');
   const ctx = canvas.getContext('2d');
   let last = 0;
+  let lastAutoSave = 0;          // Wall-Clock-Marke des letzten Auto-Saves
+  const AUTOSAVE_MS = 60000;     // jede Minute still speichern (ohne Hinweis)
 
   function loop(now) {
     const dt = Math.min(50, now - last); // dt klemmen (Tab-Wechsel etc.)
     last = now;
+
+    // Stilles Auto-Save jede Minute (nur sobald ein Spiel laeuft, kein Toast)
+    if (Game.player && now - lastAutoSave >= AUTOSAVE_MS) {
+      lastAutoSave = now;
+      Game.save();
+    }
 
     Input.beginFrame();
     const top = Game.screens[Game.screens.length - 1];
@@ -174,7 +191,7 @@ const Game = {
 
     const loading = new UI.LoadingScreen();
     Game.screens = [loading];
-    requestAnimationFrame(t => { last = t; requestAnimationFrame(loop); });
+    requestAnimationFrame(t => { last = t; lastAutoSave = t; requestAnimationFrame(loop); });
 
     // Pixel-Font laden (Fallback: monospace), dann Pokémon-Daten
     try { await document.fonts.load('8px "Press Start 2P"'); } catch (e) { /* egal */ }

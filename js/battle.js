@@ -1,8 +1,9 @@
 'use strict';
 /**
  * battle.js — Gen-1-Kampfsystem: Typentabelle, Schadensformel, Stats, EXP,
- * Fangen, Evolutionen, Attacken-Lernen sowie der komplette rundenbasierte
- * Kampfbildschirm (wilde Kämpfe UND Trainerkämpfe).
+ * Statuseffekte (GIF/BRN/PAR/EIS), Fangen (3 Ball-Stufen), Evolutionen,
+ * Attacken-Lernen, Preisgeld sowie der komplette rundenbasierte
+ * Kampfbildschirm (wilde Kämpfe UND Trainerkämpfe mit smarter Leiter-KI).
  *
  * Der Kampfablauf ist als async-Koroutine implementiert (run()): jede
  * Animation/Texteingabe wartet via Game.nextFrame() auf den Game-Loop.
@@ -128,6 +129,7 @@ const Battle = (() => {
       moves: Data.movesFor(sp, level),
       stats,
       hp: stats.hp,
+      status: null,                          // psn | brn | par | frz
       get species() { return Data.byId(this.id); },
       get name() { return Data.byId(this.id).name; },
     };
@@ -138,17 +140,20 @@ const Battle = (() => {
     const m = makeMon(saved.id, saved.level);
     m.exp = saved.exp;
     m.hp = Math.min(saved.hp, m.stats.hp);
+    m.status = saved.status || null;
     return m;
   }
 
   /**
    * Gen-1-Schadensformel (lt. Spezifikation):
    * dmg = floor(floor(floor((2L/5+2)*Power*Atk/Def)/50)+2) * STAB * TYP * rnd(0.85..1)
+   * Verbrennung halbiert den physischen Angriff (Gen 1).
    * Abkürzung: Volltreffer = simple 2x-Chance (Basis-Speed/512) statt Gen-1-Crit-Mechanik.
    */
   function damage(attacker, defender, move) {
     const special = SPECIAL.has(move.type);
-    const atk = special ? attacker.stats.spa : attacker.stats.atk;
+    let atk = special ? attacker.stats.spa : attacker.stats.atk;
+    if (!special && attacker.status === 'brn') atk = Math.max(1, Math.floor(atk / 2));
     const def = special ? defender.stats.spd : defender.stats.def;
     const stab = attacker.species.types.includes(move.type) ? 1.5 : 1;
     const typeEff = effectiveness(move.type, defender.species.types);
@@ -164,12 +169,25 @@ const Battle = (() => {
 
   /**
    * Vereinfachte Fangformel: je weniger Rest-HP, desto höher die Chance.
-   * (Gen-1 nutzt zusätzlich die Catch-Rate der Spezies — hier bewusst weggelassen.)
+   * Ball-Stufen multiplizieren; Statusprobleme geben einen Bonus
+   * (EIS +20%, sonst +10%) — Gen-1-Geist, ohne speziesabh. Catch-Rate.
    */
-  function catchChance(mon) {
+  function catchChance(mon, ballMult = 1) {
     const base = (3 * mon.stats.hp - 2 * mon.hp) / (3 * mon.stats.hp);
-    return Math.min(0.95, Math.max(0.1, base * 0.75));
+    let c = base * 0.75 * ballMult;
+    if (mon.status === 'frz') c += 0.2;
+    else if (mon.status) c += 0.1;
+    return Math.min(0.95, Math.max(0.1, c));
   }
+
+  // ----------------------------------------------------- Status-Meldungen ---
+  const STATUS_MSG = {
+    psn: 'wurde vergiftet!', brn: 'erleidet Verbrennungen!',
+    par: 'ist paralysiert! Es ist eventuell unfaehig anzugreifen!',
+    frz: 'erstarrt zu Eis!',
+  };
+  // Typ-Immunitäten gegen Status (Gen-1-nah)
+  const STATUS_IMMUNE = { psn: 'poison', brn: 'fire', frz: 'ice' };
 
   // ------------------------------------------------------- Kampfbildschirm ---
   const P = { // Palette des Kampfbildschirms
@@ -180,7 +198,7 @@ const Battle = (() => {
   class BattleScreen {
     /**
      * @param opts   wildes Mon direkt ODER { wild: mon } ODER
-     *               { trainer: { name, intro, defeat, team: [mon...], reward } }
+     *               { trainer: { name, intro, defeat, team, reward, smart } }
      * @param onEnd  Callback({result}) — 'win'|'lose'|'run'|'catch'
      */
     constructor(opts, onEnd) {
@@ -214,7 +232,6 @@ const Battle = (() => {
         await Game.nextFrame();
       }
       if (wait) {
-        // kurze Mindestanzeige, dann auf A/B warten
         let t = 0;
         while (t < 12) { t++; await Game.nextFrame(); }
         while (!Input.take('a') && !Input.take('b')) await Game.nextFrame();
@@ -234,15 +251,19 @@ const Battle = (() => {
           if (Input.take('left'))  c = (c + cols - 1) % cols;
           if (Input.take('right')) c = (c + 1) % cols;
           const ni = Math.min(items.length - 1, r * cols + c);
+          if (ni !== m.index) Sound.cursor();
           m.index = ni;
-          if (Input.take('a')) return m.index;
+          if (Input.take('a')) { Sound.confirm(); return m.index; }
           if (cancel && Input.take('b')) return -1;
         }
       } finally { this.menu = null; }
     }
 
-    /** Team-Auswahl (für Wechsel / nach K.O.). Liefert Index oder -1. */
-    async chooseParty(allowCancel) {
+    /**
+     * Team-Auswahl. mode 'alive' (Wechsel) oder 'fainted' (Beleber).
+     * Liefert Index oder -1.
+     */
+    async chooseParty(allowCancel, mode = 'alive') {
       this.partyList = { index: 0 };
       try {
         while (true) {
@@ -252,8 +273,11 @@ const Battle = (() => {
           if (Input.take('down')) this.partyList.index = (this.partyList.index + 1) % n;
           if (Input.take('a')) {
             const mon = Game.player.party[this.partyList.index];
-            if (mon === this.player) continue;        // ist schon im Kampf
-            if (mon.hp <= 0) continue;                // K.O.
+            if (mode === 'alive') {
+              if (mon === this.player || mon.hp <= 0) continue;
+            } else {
+              if (mon.hp > 0) continue;
+            }
             return this.partyList.index;
           }
           if (allowCancel && Input.take('b')) return -1;
@@ -303,7 +327,7 @@ const Battle = (() => {
           this.dispPlayerHp = this.player.hp;
           await this.say(`Los, ${this.player.name}!`, { wait: false });
           await this.pause(15);
-          await this.enemyAttack();                            // Gegner darf angreifen
+          await this.actEnemy();                               // Gegner darf angreifen
 
         } else if (action === 2) {                             // --- ITEM
           if (!await this.useItem()) continue;
@@ -315,65 +339,151 @@ const Battle = (() => {
             continue;
           }
           escapeTries++;
-          const ps = this.player.stats.spe, es = this.enemy.stats.spe;
-          // Vereinfachte Gen-1-Fluchtformel
+          const ps = this.effSpe(this.player), es = this.effSpe(this.enemy);
           const ok = ps >= es || Math.random() < (ps * 128 / es + 30 * escapeTries) / 256;
           if (ok) { await this.say('Du bist entkommen!'); this.finish('run'); return; }
           await this.say('Flucht gescheitert!');
-          await this.enemyAttack();
+          await this.actEnemy();
         }
         if (this.done) return;
         if (await this.checkPlayerFaint()) return;
       }
     }
 
-    /** ITEM-Untermenü: Pokéball / Trank. Liefert false, wenn abgebrochen. */
+    // --- Items ---------------------------------------------------------------
+    /** ITEM-Untermenü aus dem Beutel. Liefert false, wenn abgebrochen. */
     async useItem() {
       const pl = Game.player;
-      const ii = await this.choose([`POKEBALL x${pl.balls}`, `TRANK x${pl.potions || 0}`], { cols: 1 });
+      const avail = Data.ITEM_ORDER.filter(k => (pl.items[k] || 0) > 0);
+      if (!avail.length) { await this.say('Dein Beutel ist leer! Kaufe Items im MARKT.'); return false; }
+      const ii = await this.choose(avail.map(k => `${Data.ITEMS[k].name} x${pl.items[k]}`), { cols: 1 });
       if (ii < 0) return false;
+      const key = avail[ii], it = Data.ITEMS[key];
 
-      if (ii === 0) {                                          // Pokéball
+      if (it.kind === 'ball') {
         if (this.trainer) { await this.say('Man klaut keine Pokemon von Trainern!'); return false; }
-        if (pl.balls <= 0) { await this.say('Keine Pokebaelle mehr!'); return false; }
-        pl.balls--;
-        if (await this.throwBall()) return true;
-        await this.enemyAttack();
+        pl.items[key]--;
+        if (await this.throwBall(it)) return true;
+        await this.actEnemy();
         return true;
       }
-      // Trank: heilt 20 KP (Gen-1-Wert)
-      if ((pl.potions || 0) <= 0) { await this.say('Keine Traenke mehr!'); return false; }
-      if (this.player.hp >= this.player.stats.hp) { await this.say(`${this.player.name} hat volle KP!`); return false; }
-      pl.potions--;
-      const heal = Math.min(20, this.player.stats.hp - this.player.hp);
-      this.player.hp += heal;
-      await this.say(`${this.player.name} wird um ${heal} KP geheilt!`, { wait: false });
-      await this.drainHp('player', this.player.hp);
-      await this.pause(10);
-      await this.enemyAttack();
+      if (it.kind === 'heal') {
+        if (this.player.hp >= this.player.stats.hp) { await this.say(`${this.player.name} hat volle KP!`); return false; }
+        pl.items[key]--;
+        const heal = Math.min(it.amount, this.player.stats.hp - this.player.hp);
+        this.player.hp += heal;
+        Sound.heal();
+        await this.say(`${this.player.name} wird um ${heal} KP geheilt!`, { wait: false });
+        await this.drainHp('player', this.player.hp);
+        await this.pause(10);
+        await this.actEnemy();
+        return true;
+      }
+      if (it.kind === 'revive') {
+        if (!pl.party.some(m => m.hp <= 0)) { await this.say('Niemand ist kampfunfaehig!'); return false; }
+        this.msg = 'Wen wiederbeleben?'; this.msgChars = 999;
+        const idx = await this.chooseParty(true, 'fainted');
+        if (idx < 0) return false;
+        pl.items[key]--;
+        const mon = pl.party[idx];
+        mon.hp = Math.floor(mon.stats.hp / 2);
+        mon.status = null;
+        Sound.heal();
+        await this.say(`${mon.name} wurde wiederbelebt!`);
+        await this.actEnemy();
+        return true;
+      }
+      if (it.kind === 'cure') {
+        if (!this.player.status) { await this.say(`${this.player.name} hat keine Statusprobleme!`); return false; }
+        pl.items[key]--;
+        this.player.status = null;
+        Sound.heal();
+        await this.say(`${this.player.name} ist wieder gesund!`);
+        await this.actEnemy();
+        return true;
+      }
+      return false;
+    }
+
+    // --- Status-Mechanik -------------------------------------------------------
+    effSpe(mon) { return mon.status === 'par' ? Math.floor(mon.stats.spe / 4) : mon.stats.spe; }
+
+    /** Darf das Mon angreifen? (PAR 25% Ausfall, EIS bis 20%-Auftau-Chance) */
+    async canMove(mon) {
+      if (mon.status === 'frz') {
+        if (Math.random() < 0.2) {
+          mon.status = null;
+          await this.say(`${mon.name} ist aufgetaut!`);
+          return true;
+        }
+        await this.say(`${mon.name} ist zu Eis erstarrt!`);
+        return false;
+      }
+      if (mon.status === 'par' && Math.random() < 0.25) {
+        await this.say(`${mon.name} ist paralysiert! Es kann sich nicht bewegen!`);
+        return false;
+      }
       return true;
     }
 
-    /** Beide greifen an, Reihenfolge nach Initiative (Speed-Tie: Zufall). */
+    /** Gift-/Brand-Schaden nach der eigenen Aktion (Gen 1: 1/16 max KP). */
+    async afterAction(mon) {
+      if (this.done || mon.hp <= 0) return;
+      if (mon.status !== 'psn' && mon.status !== 'brn') return;
+      const dmg = Math.max(1, Math.floor(mon.stats.hp / 16));
+      await this.say(`${mon.name} leidet unter ${mon.status === 'psn' ? 'dem Gift' : 'der Verbrennung'}!`, { wait: false });
+      mon.hp = Math.max(0, mon.hp - dmg);
+      await this.drainHp(mon === this.player ? 'player' : 'enemy', mon.hp);
+      await this.pause(8);
+    }
+
+    // --- Rundenablauf ----------------------------------------------------------
+    /** Beide greifen an, Reihenfolge nach (effektiver) Initiative. */
     async fightTurn(playerMove) {
-      const playerFirst = this.player.stats.spe > this.enemy.stats.spe ||
-        (this.player.stats.spe === this.enemy.stats.spe && Math.random() < 0.5);
-      if (playerFirst) {
-        await this.useMove(this.player, this.enemy, playerMove, 'enemy');
-        if (this.enemy.hp <= 0) { await this.enemyFainted(); return; }
-        await this.enemyAttack();
-      } else {
-        await this.enemyAttack();
-        if (this.player.hp <= 0) return;       // K.O.-Check macht run()
-        await this.useMove(this.player, this.enemy, playerMove, 'enemy');
-        if (this.enemy.hp <= 0) { await this.enemyFainted(); return; }
+      const ps = this.effSpe(this.player), es = this.effSpe(this.enemy);
+      const playerFirst = ps > es || (ps === es && Math.random() < 0.5);
+      const order = playerFirst ? ['p', 'e'] : ['e', 'p'];
+      for (const side of order) {
+        if (this.done) return;
+        if (side === 'p') {
+          if (this.player.hp <= 0) continue;
+          if (await this.canMove(this.player)) {
+            await this.useMove(this.player, this.enemy, playerMove, 'enemy');
+          }
+          await this.afterAction(this.player);
+          if (this.enemy.hp <= 0) { await this.enemyFainted(); return; }
+        } else {
+          if (this.enemy.hp <= 0) continue;
+          await this.actEnemy();
+          if (this.done || this.player.hp <= 0) return;   // K.O.-Check macht run()
+        }
       }
     }
 
-    async enemyAttack() {
+    /** Gegner-KI: Leiter/Top 4 wählen effektivste Attacke, sonst Zufall. */
+    pickEnemyMove() {
+      const moves = this.enemy.moves;
+      if (this.trainer && this.trainer.smart && Math.random() > 0.15) {
+        let best = moves[0], bs = -1;
+        for (const mv of moves) {
+          const eff = effectiveness(mv.type, this.player.species.types);
+          const stab = this.enemy.species.types.includes(mv.type) ? 1.5 : 1;
+          const score = mv.power * eff * stab * (mv.acc / 100);
+          if (score > bs) { bs = score; best = mv; }
+        }
+        return best;
+      }
+      return moves[Math.floor(Math.random() * moves.length)];
+    }
+
+    /** Eine komplette Gegner-Aktion (inkl. Status-Checks + Restschaden). */
+    async actEnemy() {
       if (this.done || this.enemy.hp <= 0) return;
-      const move = this.enemy.moves[Math.floor(Math.random() * this.enemy.moves.length)];
-      await this.useMove(this.enemy, this.player, move, 'player');
+      if (await this.canMove(this.enemy)) {
+        await this.useMove(this.enemy, this.player, this.pickEnemyMove(), 'player');
+      }
+      await this.afterAction(this.enemy);
+      if (this.enemy.hp <= 0) await this.enemyFainted();   // Gift-Selbst-K.O.
     }
 
     async useMove(attacker, defender, move, defSide) {
@@ -386,17 +496,34 @@ const Battle = (() => {
       const { dmg, typeEff, crit } = damage(attacker, defender, move);
       if (typeEff === 0) { await this.say(`Es hat keine Wirkung auf ${defender.name}!`); return; }
 
-      // Treffer-Blinken + HP-Abzug
       if (defSide === 'enemy') this.flashEnemy = 18; else this.flashPlayer = 18;
+      Sound.hit(typeEff);
       await this.pause(20);
       defender.hp = Math.max(0, defender.hp - dmg);
       await this.drainHp(defSide, defender.hp);
       if (crit) await this.say('Ein Volltreffer!');
       if (typeEff > 1) await this.say('Das ist sehr effektiv!');
       else if (typeEff < 1) await this.say('Das ist nicht sehr effektiv...');
+
+      // Feuer taut Gefrorene auf
+      if (move.type === 'fire' && defender.status === 'frz') {
+        defender.status = null;
+        await this.say(`${defender.name} ist aufgetaut!`);
+      }
+      // Status-Nebeneffekt
+      if (move.fx && defender.hp > 0 && !defender.status) {
+        const immuneType = STATUS_IMMUNE[move.fx.s];
+        const immune = immuneType && defender.species.types.includes(immuneType);
+        if (!immune && Math.random() * 100 < move.fx.c) {
+          defender.status = move.fx.s;
+          await this.say(`${defender.name} ${STATUS_MSG[move.fx.s]}`);
+        }
+      }
     }
 
     async enemyFainted() {
+      if (this.done) return;
+      Sound.faint();
       await this.say(`${this.trainer ? '' : 'Wildes '}${this.enemy.name} wurde besiegt!`);
       // Gen-1-nahe EXP: baseExp * Gegnerlevel / 7 (Trainerkampf: x1.5)
       const mult = this.trainer ? 1.5 : 1;
@@ -421,9 +548,21 @@ const Battle = (() => {
         if (this.trainer.defeat) await this.say(this.trainer.defeat);
         const r = this.trainer.reward;
         if (r) {
-          if (r.balls)   { Game.player.balls += r.balls; await this.say(`Du erhältst ${r.balls}x POKEBALL!`); }
-          if (r.potions) { Game.player.potions = (Game.player.potions || 0) + r.potions; await this.say(`Du erhältst ${r.potions}x TRANK!`); }
-          if (r.badge)   { Game.player.badges = Math.max(Game.player.badges || 0, r.badge); await this.say(`Du erhältst den ${r.badgeName || 'ORDEN'}!`); }
+          if (r.money) {
+            Game.player.money = (Game.player.money || 0) + r.money;
+            await this.say(`Du gewinnst $${r.money} Preisgeld!`);
+          }
+          if (r.items) {
+            for (const key in r.items) {
+              Game.player.items[key] = (Game.player.items[key] || 0) + r.items[key];
+              await this.say(`Du erhältst ${r.items[key]}x ${Data.ITEMS[key].name}!`);
+            }
+          }
+          if (r.badge) {
+            Game.player.badges = Math.max(Game.player.badges || 0, r.badge);
+            Sound.badge();
+            await this.say(`Du erhältst den ${r.badgeName || 'ORDEN'}!`);
+          }
         }
       }
       this.finish('win');
@@ -437,6 +576,7 @@ const Battle = (() => {
         mon.stats = calcStats(mon.species.base, mon.level);
         mon.hp = Math.min(mon.stats.hp, mon.hp + (mon.stats.hp - old.hp)); // HP-Zuwachs heilt mit
         if (mon === this.player) this.dispPlayerHp = mon.hp;
+        Sound.levelup();
         await this.say(`${mon.name} erreicht Level ${mon.level}!`);
         await this.learnMoves(mon);
       }
@@ -468,7 +608,6 @@ const Battle = (() => {
         Data.sprite(Data.byId(target).front);    // Sprite vorwärmen
         Data.sprite(Data.byId(target).back);
         await this.say(`Nanu? ${oldName} entwickelt sich!`);
-        // kurze Blink-Animation
         for (let i = 0; i < 4; i++) { this.flashPlayer = 10; await this.pause(12); }
         mon.id = target;
         const old = mon.stats;
@@ -478,12 +617,14 @@ const Battle = (() => {
         if (mon === this.player) this.dispPlayerHp = mon.hp;
         Game.player.seen.add(target);
         Game.player.caught.add(target);
+        Sound.levelup();
         await this.say(`${oldName} hat sich zu ${mon.name} entwickelt!`);
       }
     }
 
     async checkPlayerFaint() {
       if (this.player.hp > 0) return false;
+      Sound.faint();
       await this.say(`${this.player.name} wurde besiegt!`);
       const alive = Game.player.party.some(m => m.hp > 0);
       if (!alive) {
@@ -500,9 +641,8 @@ const Battle = (() => {
       return false;
     }
 
-    async throwBall() {
-      await this.say('Du wirfst einen POKÉBALL!', { wait: false });
-      // Wurf-Animation: Ball fliegt zum Gegner
+    async throwBall(item) {
+      await this.say(`Du wirfst einen ${item.name}!`, { wait: false });
       this.ball = { x: 30, y: 90, shake: 0 };
       for (let t = 0; t <= 20; t++) {
         this.ball.x = 30 + (118 - 30) * t / 20;
@@ -511,7 +651,7 @@ const Battle = (() => {
       }
       this.hideEnemy = true;
       this.ball.x = 118; this.ball.y = 44;
-      const caught = Math.random() < catchChance(this.enemy);
+      const caught = Math.random() < catchChance(this.enemy, item.mult);
       const shakes = caught ? 3 : 1 + Math.floor(Math.random() * 2);
       for (let s = 0; s < shakes; s++) {
         await this.pause(18);
@@ -524,6 +664,7 @@ const Battle = (() => {
         await this.say(`Mist! ${this.enemy.name} hat sich befreit!`);
         return false;
       }
+      Sound.catch();
       await this.say(`Super! ${this.enemy.name} wurde gefangen!`);
       Game.player.caught.add(this.enemy.id);
       Game.player.seen.add(this.enemy.id);
@@ -560,6 +701,13 @@ const Battle = (() => {
       else Data.drawPlaceholder(ctx, mon.species, x, y, 56);
     }
 
+    drawStatus(ctx, mon, x, y) {
+      if (!mon.status) return;
+      ctx.fillStyle = Data.STATUS_COLORS[mon.status];
+      ctx.fillRect(x - 1, y - 1, 26, 9);
+      UI.text(ctx, Data.STATUS_DE[mon.status], x, y, '#f8f8f8');
+    }
+
     draw(ctx) {
       ctx.fillStyle = P.bg; ctx.fillRect(0, 0, 160, 144);
 
@@ -586,6 +734,7 @@ const Battle = (() => {
       UI.box(ctx, 2, 2, 92, 34);
       UI.text(ctx, this.enemy.name.toUpperCase(), 6, 7);
       UI.text(ctx, ':L' + this.enemy.level, 52, 16);
+      this.drawStatus(ctx, this.enemy, 10, 17);
       UI.hpBar(ctx, 10, 26, 76, this.dispEnemyHp, this.enemy.stats.hp);
       // Trainerkampf: verbleibende Team-Bälle des Gegners
       if (this.trainer) {
@@ -599,13 +748,13 @@ const Battle = (() => {
       UI.box(ctx, 64, 56, 94, 40);
       UI.text(ctx, this.player.name.toUpperCase(), 68, 60);
       UI.text(ctx, ':L' + this.player.level, 116, 69);
+      this.drawStatus(ctx, this.player, 72, 70);
       UI.hpBar(ctx, 72, 80, 78, this.dispPlayerHp, this.player.stats.hp);
       UI.text(ctx, `${this.dispPlayerHp}/${this.player.stats.hp}`, 88, 87);
 
       // Textbox
       UI.box(ctx, 0, 96, 160, 48);
       if (this.menu && this.menu.kind === 'main') {
-        // Hauptmenü rechts in der Textbox (klassisch)
         UI.box(ctx, 64, 96, 96, 48);
         this.menu.items.forEach((it, i) => {
           const y = 102 + i * 10;
@@ -614,12 +763,16 @@ const Battle = (() => {
         });
         UI.textWrapped(ctx, this.msg, 6, 108, 7);
       } else if (this.menu) {
-        // Attacken-/Item-Liste
-        this.menu.items.forEach((it, i) => {
+        // Attacken-/Item-Liste (scrollt bei mehr als 4 Einträgen)
+        const items = this.menu.items;
+        const scroll = Math.max(0, Math.min(this.menu.index - 2, items.length - 4));
+        items.slice(scroll, scroll + 4).forEach((it, i) => {
           const y = 104 + i * 10;
           UI.text(ctx, it, 18, y);
-          if (i === this.menu.index) UI.text(ctx, '>', 8, y);
+          if (scroll + i === this.menu.index) UI.text(ctx, '>', 8, y);
         });
+        if (scroll > 0) UI.text(ctx, '^', 150, 102);
+        if (scroll + 4 < items.length) UI.text(ctx, 'v', 150, 136);
       } else {
         UI.textWrapped(ctx, this.msg.slice(0, this.msgChars), 6, 108, 18);
         if (this.msgChars >= this.msg.length && this.msg && Math.floor(this.time / 400) % 2 === 0) {
