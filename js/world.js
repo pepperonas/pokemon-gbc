@@ -135,6 +135,12 @@ const World = (() => {
     set(39, 29, T.SIGN);
     m.signs['39,29'] = 'STEINSTADT - ARENA von ROCKO (GESTEIN). MARKT im Sueden.';
 
+    // --- Waldpfad (Nord) -> NEBELWALD / TEAM-SCHATTEN-Story ---
+    set(31, 18, T.CAVE);
+    m.doors['31,18'] = { warp: 'nebelwald', x: 13, y: 17, dir: 'up' };
+    set(32, 19, T.SIGN);
+    m.signs['32,19'] = 'WALDPFAD: Im NEBELWALD treibt TEAM SCHATTEN sein Unwesen!';
+
     // ===== ROUTE 3 =====
     rect(29, 31, 2, 12, T.PATH);
     rect(29, 42, 39, 2, T.PATH);
@@ -626,6 +632,99 @@ const World = (() => {
     ];
   }
 
+  // ==================================== STORY-REGION: TEAM SCHATTEN (NEU) ===
+  // Mini-Story, erreichbar ab STEINSTADT (Waldpfad nach Norden):
+  //   NEBELWALD (Wild-Encounter, 2 Schatten-Rüpel, Rivale SILAS blockt den Pfad)
+  //   -> SCHATTENVERSTECK (Innenraum: 2 Rüpel + BOSS NOX, Belohnung MEISTERBALL).
+  // Reines Story-Side-Content; berührt weder Orden-Gating noch die LIGA.
+  function buildStoryRegion() {
+    const outdoor = (id, w, h) => {
+      const m = new GameMap(id, w, h, false);
+      m.rect(0, 0, w, h, T.GRASS);
+      m.rect(0, 0, w, 1, T.TREE); m.rect(0, h - 1, w, 1, T.TREE);
+      m.rect(0, 0, 1, h, T.TREE); m.rect(w - 1, 0, 1, h, T.TREE);
+      MAPS[id] = m;
+      return m;
+    };
+
+    // --- NEBELWALD (26x20) ---
+    const nw = outdoor('nebelwald', 26, 20);
+    nw.rect(13, 1, 1, 18, T.PATH);                 // schmaler 1-Kachel-Pfad (Rivale gated)
+    nw.set(13, 18, T.CAVE); nw.doors['13,18'] = { warp: 'overworld', x: 31, y: 19, dir: 'down' };
+    nw.set(13, 1, T.CAVE);  nw.doors['13,1']  = { warp: 'schattenversteck', dir: 'up' };
+    nw.rect(3, 4, 5, 4, T.TALL);
+    nw.rect(18, 3, 5, 4, T.TALL);
+    nw.rect(3, 12, 5, 4, T.TALL);
+    nw.rect(17, 12, 6, 4, T.TALL);
+    nw.rect(15, 7, 4, 3, T.TALL);
+    nw.set(10, 3, T.TREE); nw.set(16, 5, T.TREE); nw.set(9, 11, T.TREE);
+    nw.set(20, 9, T.TREE); nw.set(11, 15, T.TREE); nw.set(8, 8, T.TREE);
+    nw.rect(5, 9, 2, 1, T.FLOWER);
+    nw.set(14, 16, T.SIGN);
+    nw.signs['14,16'] = 'NEBELWALD - Dichter Nebel. TEAM SCHATTEN lauert voraus!';
+    nw.npcs = [{ x: 12, y: 16, shirt: '#806048', hair: '#583820',
+      text: 'Sei vorsichtig! TEAM SCHATTEN hat sich tiefer im Wald verschanzt.' }];
+    nw.zones = [{ name: 'NEBELWALD', x: 1, y: 1, w: 24, h: 18, lv: [18, 24], table: [
+      [41, 16], [46, 12], [48, 12], [69, 10], [92, 10], [43, 8], [123, 6], [16, 6],
+      [102, 5], [114, 4], [108, 3], [137, 1]] }];
+    nw.trainers = [
+      { id: 'silas1', x: 13, y: 9, dir: 'down', range: 4, smart: true, moveAfter: { x: 12, y: 9 },
+        shirt: '#583890', hair: '#382038', name: 'RIVALE SILAS',
+        intro: 'Du auch hier? TEAM SCHATTEN gehoert MIR allein - aus dem Weg!',
+        defeat: 'Tch! Du bist staerker geworden... Na gut, gehen wir gemeinsam rein.',
+        after: 'Der BOSS steckt ganz hinten im Versteck. Pass auf dich auf!',
+        team: [[58, 22], [64, 22], [123, 24]], reward: { money: 2000 }, flag: 'rival_silas1' },
+      { id: 'grunt1', x: 16, y: 8, dir: 'left', range: 3, shirt: '#282838', hair: '#181818', name: 'SCHATTEN-RUEPEL',
+        intro: 'Niemand stoert TEAM SCHATTEN!', defeat: 'Wie konnte das passieren...',
+        after: 'Der BOSS wird dich erledigen!',
+        team: [[41, 20], [109, 21]], reward: { money: 800 } },
+      { id: 'grunt2', x: 16, y: 13, dir: 'left', range: 3, shirt: '#282838', hair: '#383838', name: 'SCHATTEN-RUEPEL',
+        intro: 'Verschwinde, Goere!', defeat: 'Autsch!',
+        after: 'Du kommst hier nicht so leicht durch!',
+        team: [[88, 21], [42, 22]], reward: { money: 850 } },
+    ];
+
+    // --- SCHATTENVERSTECK (Innenraum) ---
+    const hide = buildInterior('schattenversteck', [
+      '############',
+      '#..........#',
+      '#..s....s..#',
+      '#..........#',
+      '#.s......s.#',
+      '#..........#',
+      '#.s......s.#',
+      '#..........#',
+      '#...ssss...#',
+      '#..........#',
+      '#..........#',
+      '#####mm#####',
+    ], { x: 0, y: 0 }, {
+      npcs: [{ x: 9, y: 3, shirt: '#c0c0c0', hair: '#c8a030',
+        text: 'WISSENSCHAFTLER: Du hast TEAM SCHATTEN gestoppt! Tausend Dank!' }],
+      trainers: [
+        { id: 'sgrunt3', x: 3, y: 7, dir: 'right', range: 3, shirt: '#282838', hair: '#181818', name: 'SCHATTEN-RUEPEL',
+          intro: 'Der BOSS will nicht gestoert werden!', defeat: 'Unmoeglich!',
+          after: 'Du wirst es bereuen...',
+          team: [[89, 24], [42, 24]], reward: { money: 900 } },
+        { id: 'sgrunt4', x: 8, y: 5, dir: 'left', range: 3, shirt: '#282838', hair: '#383838', name: 'SCHATTEN-RUEPEL',
+          intro: 'Bis hierher und nicht weiter!', defeat: 'Argh!',
+          after: 'Der BOSS ist unbesiegbar!',
+          team: [[105, 24], [110, 25]], reward: { money: 950 } },
+        { id: 'nox', x: 5, y: 2, dir: 'down', range: 0, smart: true, leader: true,
+          shirt: '#481848', hair: '#7038a8', name: 'SCHATTEN-BOSS NOX',
+          intro: 'Ich bin NOX, Anfuehrer von TEAM SCHATTEN! Knie nieder!',
+          defeat: 'Unfassbar... Mein Team... besiegt. TEAM SCHATTEN loest sich auf!',
+          after: 'TEAM SCHATTEN ist Geschichte. Die Region ist wieder sicher.',
+          team: [[94, 30], [24, 30], [112, 31], [130, 32]],
+          reward: { money: 6000, items: { masterball: 1 } },
+          flag: 'team_schatten',
+          winMsg: 'Im Versteck findest du einen seltenen MEISTERBALL! TEAM SCHATTEN ist besiegt!' },
+      ],
+    });
+    // Ausgangs-Matten zurueck in den NEBELWALD (statt Overworld)
+    for (const k in hide.doors) hide.doors[k] = { warp: 'nebelwald', x: 13, y: 2, dir: 'down' };
+  }
+
   // -------------------------------------------------------- Begegnungen ---
   const GRASS_RATE = 0.12;
   const CAVE_RATE  = 0.08;
@@ -706,6 +805,7 @@ const World = (() => {
   buildOverworld();
   buildInteriors();
   buildExtraMaps();
+  buildStoryRegion();
   for (const id in MAPS) {
     for (const tr of MAPS[id].trainers) tr.sprites = buildCharset(tr.shirt, tr.hair);
     for (const n of MAPS[id].npcs) n.sprites = n.shirt ? buildCharset(n.shirt, n.hair || '#583820') : NPC_SPRITES;

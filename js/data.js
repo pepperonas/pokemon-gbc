@@ -84,13 +84,14 @@ const Data = (() => {
     ball:        { name: 'POKEBALL',   price: 200,  kind: 'ball', mult: 1 },
     greatball:   { name: 'SUPERBALL',  price: 600,  kind: 'ball', mult: 1.5 },
     ultraball:   { name: 'HYPERBALL',  price: 1200, kind: 'ball', mult: 2 },
+    masterball:  { name: 'MEISTERBALL', price: 0,   kind: 'ball', mult: 255, guaranteed: true },
     potion:      { name: 'TRANK',      price: 300,  kind: 'heal', amount: 20 },
     superpotion: { name: 'SUPERTRANK', price: 700,  kind: 'heal', amount: 50 },
     hyperpotion: { name: 'HYPERTRANK', price: 1500, kind: 'heal', amount: 200 },
     revive:      { name: 'BELEBER',    price: 1500, kind: 'revive' },
     fullheal:    { name: 'HEILER',     price: 600,  kind: 'cure' },
   };
-  const ITEM_ORDER = ['ball', 'greatball', 'ultraball', 'potion', 'superpotion', 'hyperpotion', 'revive', 'fullheal'];
+  const ITEM_ORDER = ['masterball', 'ball', 'greatball', 'ultraball', 'potion', 'superpotion', 'hyperpotion', 'revive', 'fullheal'];
   // Sortiment je Markt-Stufe
   const MART_TIERS = {
     1: ['ball', 'potion'],

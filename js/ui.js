@@ -180,7 +180,7 @@ const UI = (() => {
   // ------------------------------------------------------- Pausenmenü ---
   class PauseMenuScreen {
     constructor() {
-      this.items = ['TEAM', 'BEUTEL', 'POKEDEX', 'BOX', 'SPEICHERN', 'ZURUECK'];
+      this.items = ['TEAM', 'BEUTEL', 'POKEDEX', 'BOX', 'ONLINE', 'SPEICHERN', 'ZURUECK'];
       this.index = 0; this.toast = 0;
     }
     update(dt) {
@@ -196,6 +196,7 @@ const UI = (() => {
           case 'BEUTEL':    Game.push(new ItemScreen()); break;
           case 'POKEDEX':   Game.push(new DexScreen()); break;
           case 'BOX':       Game.push(new BoxScreen()); break;
+          case 'ONLINE':    Game.push(new OnlineScreen()); break;
           case 'SPEICHERN': Game.save(); this.toast = 1200; break;
           case 'ZURUECK':   Game.pop(); break;
         }
@@ -205,8 +206,8 @@ const UI = (() => {
       const p = Game.player;
       box(ctx, 58, 2, 98, 116);
       this.items.forEach((it, i) => {
-        text(ctx, it, 78, 9 + i * 11);
-        if (i === this.index) text(ctx, '>', 68, 9 + i * 11);
+        text(ctx, it, 78, 9 + i * 10);
+        if (i === this.index) text(ctx, '>', 68, 9 + i * 10);
       });
       // Statuszeilen: Geld + Orden
       ctx.fillStyle = INK; ctx.fillRect(66, 78, 82, 1);
@@ -533,9 +534,180 @@ const UI = (() => {
     }
   }
 
+  // --------------------------------------------------- Online / Lobby ---
+  // Kleiner GBC-Pokéball für Lade-/Such-Animationen (rotierender Glanzpunkt).
+  function spinBall(ctx, cx, cy, r, t) {
+    ctx.fillStyle = '#e03028'; ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = PAPER;    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI); ctx.fill();
+    ctx.strokeStyle = INK; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke();
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
+    const a = t / 250;       // rotierender Glanzpunkt um den Ball
+    ctx.fillStyle = '#f8d030';
+    ctx.fillRect(Math.round(cx + Math.cos(a) * (r + 3)) - 1, Math.round(cy + Math.sin(a) * (r + 3)) - 1, 2, 2);
+  }
+  const dots = t => '.'.repeat(1 + Math.floor(t / 350) % 3);
+
+  /** Einstiegs-Lobby: Schnellkampf / Raum erstellen / Code eingeben. */
+  class OnlineScreen {
+    constructor() {
+      this.items = ['SCHNELLKAMPF', 'RAUM OEFFNEN', 'CODE EINGEBEN', 'ZURUECK'];
+      this.index = 0; this.t = 0;
+      this.transport = Net.makeTransport();
+      this.status = 'connecting';
+      this.busy = false;
+      this.transport.connect().then(() => { this.status = 'online'; }).catch(() => { this.status = 'offline'; });
+    }
+    update(dt) {
+      this.t += dt;
+      if (this.busy) return;                  // während createRoom() kurz gesperrt
+      const n = this.items.length;
+      if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
+      if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
+      if (Input.take('b')) { Game.pop(); return; }
+      if (Input.take('a')) {
+        Sound.confirm();
+        switch (this.items[this.index]) {
+          case 'SCHNELLKAMPF':   Game.push(new OnlineSearchScreen(this.transport, 'quick')); break;
+          case 'RAUM OEFFNEN':
+            this.busy = true;
+            this.transport.createRoom().then(({ code }) => {
+              this.busy = false;
+              Game.push(new OnlineSearchScreen(this.transport, 'host', code));
+            }).catch(() => { this.busy = false; });
+            break;
+          case 'CODE EINGEBEN':  Game.push(new OnlineCodeScreen(this.transport)); break;
+          case 'ZURUECK':        Game.pop(); break;
+        }
+      }
+    }
+    draw(ctx) {
+      ctx.fillStyle = '#283050'; ctx.fillRect(0, 0, 160, 144);
+      // Kopf
+      ctx.fillStyle = '#e03028'; ctx.fillRect(16, 8, 128, 22);
+      ctx.strokeStyle = '#f8d030'; ctx.lineWidth = 2; ctx.strokeRect(17, 9, 126, 20);
+      text(ctx, 'ONLINE-KAMPF', 32, 14, '#f8d030');
+      // Status-Anzeige
+      const stCol = this.status === 'online' ? '#30b850' : this.status === 'offline' ? '#e03028' : '#f8b800';
+      ctx.fillStyle = stCol; ctx.fillRect(20, 38, 6, 6);
+      const stTxt = this.status === 'online' ? 'VERBUNDEN' : this.status === 'offline' ? 'OFFLINE' : 'VERBINDE' + dots(this.t);
+      text(ctx, stTxt, 32, 38, '#a8b8d8');
+      text(ctx, 'ID: ' + Net.trainerId(), 32, 50, '#a8b8d8');
+      // Menü
+      box(ctx, 16, 64, 128, 60);
+      this.items.forEach((it, i) => {
+        const y = 72 + i * 12;
+        text(ctx, it, 36, y);
+        if (i === this.index) text(ctx, '>', 26, y);
+      });
+      if (this.busy) text(ctx, 'Erstelle Raum' + dots(this.t), 24, 128, '#68789a');
+      else text(ctx, 'B: Zurueck', 24, 130, '#68789a');
+    }
+  }
+
+  /**
+   * Such-/Warte-Screen für alle drei Modi:
+   *   'quick' Schnellkampf · 'host' Raum (Code anzeigen) · 'join' Code beitreten.
+   * Da noch kein Backend live ist, endet die Suche höflich im „bald"-Hinweis —
+   * der Übergang in den echten PvP-Kampf ist als TODO markiert (Phase P1).
+   */
+  class OnlineSearchScreen {
+    constructor(transport, mode, code = null) {
+      this.tp = transport; this.mode = mode; this.code = code;
+      this.t = 0; this.phase = 'search';      // 'search' | 'notice'
+      this.notice = '';
+      const onTick = () => {};
+      const done = ({ opponent }) => this.onMatched(opponent);
+      const fail = reason => {
+        if (reason === 'cancelled') return;   // per B abgebrochen -> Screen schon weg
+        this.phase = 'notice';
+        this.notice = !Net.available
+          ? 'Der ONLINE-DIENST startet bald! Aktuell ist noch kein Gegner erreichbar.'
+          : (reason === 'no-room' ? 'Kein Raum mit diesem CODE gefunden.' : 'Kein Gegner gefunden. Versuch es spaeter erneut!');
+        Sound.cursor();
+      };
+      if (mode === 'quick')      transport.quickMatch(onTick).then(done).catch(fail);
+      else if (mode === 'host')  transport.waitForJoin(code, onTick).then(done).catch(fail);
+      else                       transport.joinRoom(code, onTick).then(done).catch(fail);
+    }
+    onMatched(opponent) {
+      // Phase P1: hier startet der synchronisierte PvP-Kampf (siehe Plan).
+      this.phase = 'notice';
+      this.notice = 'Gegner ' + (opponent && opponent.id || '') + ' gefunden!';
+    }
+    update(dt) {
+      this.t += dt;
+      if (this.phase === 'notice') {
+        if (Input.take('a') || Input.take('b')) { Game.pop(); }
+        return;
+      }
+      if (Input.take('b')) { this.tp.cancel(); Game.pop(); }
+    }
+    draw(ctx) {
+      ctx.fillStyle = '#283050'; ctx.fillRect(0, 0, 160, 144);
+      if (this.phase === 'notice') {
+        spinBall(ctx, 80, 40, 12, 0);
+        box(ctx, 8, 64, 144, 56);
+        textWrapped(ctx, this.notice, 16, 74, 16);
+        text(ctx, 'A: OK', 16, 108, '#68789a');
+        return;
+      }
+      spinBall(ctx, 80, 44, 13, this.t);
+      const head = this.mode === 'host' ? 'WARTE AUF GEGNER' : 'SUCHE GEGNER';
+      text(ctx, head + dots(this.t), 28, 72, '#f8f8f8');
+      if (this.code) {
+        box(ctx, 40, 86, 80, 24);
+        text(ctx, 'CODE ' + this.code, 52, 94, '#f8d030');
+      }
+      text(ctx, 'B: Abbrechen', 36, 124, '#68789a');
+    }
+  }
+
+  /** GBC-Code-Eingabe: 4 Slots, hoch/runter ändert Zeichen, A bestätigt. */
+  class OnlineCodeScreen {
+    constructor(transport) {
+      this.tp = transport;
+      this.chars = Net.CODE_CHARS;
+      this.slots = [0, 0, 0, 0];
+      this.pos = 0; this.t = 0;
+    }
+    update(dt) {
+      this.t += dt;
+      if (Input.take('b')) { Game.pop(); return; }
+      if (Input.take('left'))  { this.pos = (this.pos + 3) % 4; Sound.cursor(); }
+      if (Input.take('right')) { this.pos = (this.pos + 1) % 4; Sound.cursor(); }
+      const n = this.chars.length;
+      if (Input.take('up'))    { this.slots[this.pos] = (this.slots[this.pos] + 1) % n; Sound.cursor(); }
+      if (Input.take('down'))  { this.slots[this.pos] = (this.slots[this.pos] + n - 1) % n; Sound.cursor(); }
+      if (Input.take('a')) {
+        Sound.confirm();
+        const code = this.slots.map(i => this.chars[i]).join('');
+        Game.pop();                                  // Code-Screen schließen
+        Game.push(new OnlineSearchScreen(this.tp, 'join', code));
+      }
+    }
+    draw(ctx) {
+      ctx.fillStyle = '#283050'; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'CODE EINGEBEN', 28, 18, '#f8d030');
+      for (let i = 0; i < 4; i++) {
+        const x = 30 + i * 26;
+        box(ctx, x, 56, 20, 24);
+        text(ctx, this.chars[this.slots[i]], x + 6, 64, i === this.pos ? '#e03028' : INK);
+        if (i === this.pos) {
+          text(ctx, '^', x + 6, 46, '#f8f8f8');
+          text(ctx, 'v', x + 6, 82, '#f8f8f8');
+        }
+      }
+      text(ctx, 'A: Beitreten', 36, 108, '#a8b8d8');
+      text(ctx, 'B: Zurueck', 36, 120, '#68789a');
+    }
+  }
+
   return {
     text, textWrapped, box, hpBar, drawSilhouette, drawMonDetail,
     LoadingScreen, TitleScreen, StarterScreen, PauseMenuScreen,
     TeamScreen, BoxScreen, DexScreen, ItemScreen, MartScreen,
+    OnlineScreen, OnlineSearchScreen, OnlineCodeScreen,
   };
 })();

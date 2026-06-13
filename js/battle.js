@@ -651,7 +651,7 @@ const Battle = (() => {
       }
       this.hideEnemy = true;
       this.ball.x = 118; this.ball.y = 44;
-      const caught = Math.random() < catchChance(this.enemy, item.mult);
+      const caught = item.guaranteed || Math.random() < catchChance(this.enemy, item.mult);
       const shakes = caught ? 3 : 1 + Math.floor(Math.random() * 2);
       for (let s = 0; s < shakes; s++) {
         await this.pause(18);

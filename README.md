@@ -29,12 +29,14 @@
 - **Gen-1-Kampfsystem** — vollständige 15-Typen-Tabelle inkl. aller Quirks (Geist→Psycho = 0, Käfer↔Gift beidseitig 2x), exakte Gen-1-Schadensformel, STAB, Volltreffer, Initiative-Reihenfolge.
 - **Evolutionen** — alle Gen-1-Evolutionslinien mit Original-Leveln (Glumanda→Glutexo→Glurak …). Stein-/Tausch-Evolutionen sind auf Level gemappt, Evoli verzweigt zufällig in Aquana/Blitza/Flamara.
 - **Attacken-Lernen** — beim Level-Up werden stärkere typgerechte Attacken freigeschaltet.
-- **Komplette Spielwelt mit begehbaren Innenräumen** — 2 Dörfer, 2 Städte, 4 Routen, eine Höhle, der Siegesweg sowie die neuen Gebiete NATURPARK und DRACHENTAL — 15 Maps insgesamt: Arenen, Poké-Center, Märkte und dein Zuhause sind echte Innenräume mit Warp-Türen (Overworld: 72×60 Tiles, alles prozedural gezeichnet).
+- **Komplette Spielwelt mit begehbaren Innenräumen** — 2 Dörfer, 2 Städte, 4 Routen, eine Höhle, der Siegesweg, NATURPARK & DRACHENTAL sowie die Story-Region NEBELWALD + SCHATTENVERSTECK — 17 Maps insgesamt: Arenen, Poké-Center, Märkte und dein Zuhause sind echte Innenräume mit Warp-Türen (Overworld: 72×60 Tiles, alles prozedural gezeichnet).
+- **Story: TEAM SCHATTEN** — ab STEINSTADT führt ein Waldpfad in den NEBELWALD. Dein Rivale SILAS versperrt den Pfad, zwei Rüpel lauern im Gras, und tief im SCHATTENVERSTECK wartet BOSS NOX. Sein Sturz belohnt dich mit einem **MEISTERBALL** (fängt garantiert).
+- **Online-Kampf (Vorschau)** — Pausenmenü → ONLINE: Lobby im offiziellen GBC-Look mit Schnellkampf, privaten Räumen (4-stelliger Code) und Code-Beitritt. Der autoritative WebSocket-Server ist in [`MULTIPLAYER_PLAN.md`](MULTIPLAYER_PLAN.md) spezifiziert (Mock-Transport bis Phase P1).
 - **2 echte Arenen** — mit Arena-Trainern im Inneren und Rocko (Gestein) bzw. Misty (Wasser) als Leiter mit schlauer Typ-KI; Orden als Belohnung.
 - **Pokémon-Liga als Gauntlet** — Top 4 (Lorelei/Eis, Bruno/Kampf, Agathe/Geist, Siegfried/Drache, L51–56) blockieren nacheinander den Weg zum Champion Blau (6er-Team bis L60). Zutritt nur mit beiden Orden.
 - **Statuseffekte** — Gift, Verbrennung, Paralyse, Gefrieren mit Gen-1-Mechanik: 1/16-Rundenschaden, Brand halbiert den phys. Angriff, Paralyse viertelt Initiative + 25 % Ausfall, Feuer taut auf, Typ-Immunitäten.
 - **Geld & Märkte** — Trainer zahlen Preisgeld; 3 Markt-Stufen verkaufen Pokéball/Superball/Hyperball, Trank/Supertrank/Hypertrank, Beleber und Heiler. Bälle mit Fangbonus, Status erhöht die Fangchance.
-- **Sicht-Trainer** — 25 Trainer entdecken dich klassisch per Sichtlinie („!"), laufen heran und fordern dich heraus (kein Fangen/Fliehen, 1,5x EXP) — darunter Picknicker, Park-Ranger und die Ass-Trainer im DRACHENTAL.
+- **Sicht-Trainer** — 31 Trainer entdecken dich klassisch per Sichtlinie („!"), laufen heran und fordern dich heraus (kein Fangen/Fliehen, 1,5x EXP) — darunter Picknicker, Park-Ranger, die Ass-Trainer im DRACHENTAL und TEAM SCHATTEN im NEBELWALD.
 - **Neue Gebiete hinter KUESTENDORF** — der Höhleneingang führt über ROUTE 4 in den **NATURPARK** (eigener Heil-Ranger, alle drei EVOLI-Formen wild fangbar) und – erst nach dem Champion-Sieg – ins **DRACHENTAL** mit wilden Drachen und Endgame-Trainern auf Level 42–55.
 - **5 Legendäre** — Arktos (Felsgrotte), Zapdos (Route 2), Lavados (Siegesweg), Mewtu (Geheimkammer, erst nach dem Champion-Sieg) und Mew (versteckt hinter der Liga).
 - **Fangen, Team & Box** — HP-abhängige Fangchance mit Ball-Wurf-Animation, Team (max. 6), Box, Tauschen.
@@ -90,6 +92,8 @@ KIEFERNDORF (Start + Starterwahl, MAMA heilt zu Hause)
 WALDDORF (Markt) ── Route 2 (L10-15) ── FELSGROTTE (L14-19) ⛰ Arktos
    ┌──────────────────────────────────┘
 STEINSTADT (Center + Markt) 🥇 Arena 1: ROCKO (Gestein, 2 Arena-Trainer)
+   │  Waldpfad (Nord) → NEBELWALD (L18-24) 👤 Rivale SILAS
+   │       └─ SCHATTENVERSTECK 🕶 BOSS NOX → MEISTERBALL
    │  Route 3 (L17-23)
 KUESTENDORF (Center + Markt) 🥈 Arena 2: MISTY (Wasser) 🌊 Lapras am Strand
    │  Tor: nur mit 2 ORDEN          └─ Höhle (Osten) → ROUTE 4 (L20-26)
@@ -116,7 +120,8 @@ Ja — **alles liegt in `localStorage`**:
 | `js/pokedex.js` | **Auto-generiert** (`tools/fetch-pokedex.js`): `window.POKEDEX` mit allen 151 Einträgen + lokalen Sprite-Pfaden — macht das Spiel offline-fähig |
 | `js/battle.js` | Typen-Tabelle, Schadensformel, Stats/EXP, Statuseffekte, Evolutionstabelle, Fangen (3 Ball-Stufen), Preisgeld, smarte Leiter-KI, kompletter Kampfbildschirm (wild + Trainer) |
 | `js/world.js` | Multi-Map-System (Overworld 72×60 + 11 Interiors per ASCII-Layout), Warps, Zonen-Encounter, Sicht-Trainer, Arenen, Liga-Gauntlet, Tore, Legendäre, prozedurale Tiles & Charsets |
-| `js/ui.js` | Textbox/Menü-Helfer, Titel, Starterwahl, Pausenmenü, Team, Beutel, Markt, Box, Pokédex |
+| `js/ui.js` | Textbox/Menü-Helfer, Titel, Starterwahl, Pausenmenü, Team, Beutel, Markt, Box, Pokédex, Online-Lobby (Schnellkampf/Raum/Code) |
+| `js/net.js` | Online-Transport-Abstraktion + Mock (Trainer-ID, Raum-Codes); WebSocket-Anbindung folgt laut `MULTIPLAYER_PLAN.md` |
 | `js/sound.js` | GBC-artige WebAudio-SFX (Square/Triangle-Bleeps), Mute-Toggle |
 | `js/main.js` | Game-Loop, Screen-Stack, Eingaben (Tastatur + Touch), Speichern/Laden mit Migration, pixel-perfekte Skalierung |
 
