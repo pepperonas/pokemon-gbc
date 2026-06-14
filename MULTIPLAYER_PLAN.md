@@ -7,15 +7,17 @@ im Stil der übrigen celox.io-Apps. Die Lobby-UI ist bereits im Spiel umgesetzt
 nur das Transport-Interface aus `js/net.js` an — der Server klinkt sich dort ein,
 die Screens bleiben unverändert.
 
-> **Status heute:** Lobby live als Vorschau (Mock-Transport, `Net.available=false`).
-> Es fliegt noch kein Datenverkehr nach außen. Dieser Plan beschreibt P0–P3 bis
-> zum produktiven Ranglisten-PvP.
+> **🟢 LIVE:** Echtes PvP läuft auf `wss://pokemon.celox.io/ws`. Pausenmenü →
+> ONLINE → Schnellkampf / Raum öffnen (Code) / Code eingeben → Kampf im
+> GBC-Look. Der Server ist autoritativ (Node + ws, systemd `pkmn-battle`).
 >
-> **✅ Phase P0 erledigt** — `js/battle-core.js` ist extrahiert (isomorph für
-> Browser + Node), enthält die seedbare RNG (`makeRng`/mulberry32) und ist die
-> gemeinsame Quelle der Wahrheit; `js/battle.js` konsumiert sie, Solo unverändert.
-> Offen aus P0: `resolveTurn(state, a, b, rng)` (event-basierte Rundenauflösung)
-> — folgt zusammen mit dem Server in P1.
+> **✅ Phase P0 erledigt** — `js/battle-core.js` (isomorph Browser + Node),
+> seedbare RNG (`makeRng`/mulberry32), gemeinsame Quelle der Wahrheit.
+>
+> **✅ Phase P1 erledigt** — `resolveTurn` (event-basiert) im Core, autoritativer
+> `server/server.js` (Matchmaking, Räume, Team-Validierung, Turn-Loop, erzwungene
+> Wechsel, Timeouts, Disconnect→Forfeit), `WebSocketTransport` + `OnlineBattleScreen`
+> im Client, nginx-`/ws`-Proxy + systemd-Service. Headless- UND Browser-E2E grün.
 
 ---
 
@@ -211,8 +213,8 @@ Hobby-Last locker auf dem bestehenden VPS; bei Bedarf später Cluster + sticky.
 | Phase | Inhalt | Ergebnis |
 |-------|--------|----------|
 | **P0 ✅** | `battle-core.js` aus `battle.js` extrahiert, seedbarer RNG, Solo nutzt es weiter | Engine isomorph & testbar, Solo unverändert |
-| **P1** | `resolveTurn` (event-basiert), `pkmn-battle-server` (queue/create/join), `WebSocketTransport`, Team-Validierung, `quickMatch` live | **Erster echter PvP-Kampf** Browser↔Browser |
-| **P2** | Private Räume + Code-Beitritt, Reconnect, Timeouts, Klausel-Sets | Mit Freunden gezielt spielen, stabil |
+| **P1 ✅** | `resolveTurn` (event-basiert), `server/server.js` (queue/create/join), `WebSocketTransport` + `OnlineBattleScreen`, Team-Validierung, Timeouts, Disconnect→Forfeit | **Echter PvP-Kampf live** auf wss://pokemon.celox.io/ws |
+| **P2** | Reconnect-Token, Klausel-Sets (Legendären-Sperre), Raum-Optionen | Stabiler, konfigurierbarer |
 | **P3** | Wertung (ELO), Sieg-/Niederlage-Statistik, optional Rangliste, Spectate | Kompetitives Online-Meta |
 
 P0 ist reine Client-Refaktorierung (kein Risiko, sofort startbar). Ab P1 läuft

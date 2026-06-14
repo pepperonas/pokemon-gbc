@@ -35,16 +35,16 @@
     <footer>© 2026 Martin Pfeffer | celox.io</footer>
   </div>
 
-  <!-- ?v=7: battle-core.js (isomorphe Kampflogik + seedbare RNG, PvP-Phase P0) -->
-  <!-- pokedex.js zuerst: stellt window.POKEDEX bereit (Daten + lokale Sprite-Pfade) -->
-  <script src="js/pokedex.js?v=7"></script>
-  <script src="js/data.js?v=7"></script>
-  <script src="js/sound.js?v=7"></script>
-  <script src="js/net.js?v=7"></script>
-  <script src="js/ui.js?v=7"></script>
-  <script src="js/battle-core.js?v=7"></script>
-  <script src="js/battle.js?v=7"></script>
-  <script src="js/world.js?v=7"></script>
-  <script src="js/main.js?v=7"></script>
+  <!-- ?v=8: PvP Phase P1 — resolveTurn, WebSocket-Transport + Online-Kampf -->
+  <!-- battle-core.js früh: data.js (movesFor) delegiert an BattleCore -->
+  <script src="js/pokedex.js?v=8"></script>
+  <script src="js/battle-core.js?v=8"></script>
+  <script src="js/data.js?v=8"></script>
+  <script src="js/sound.js?v=8"></script>
+  <script src="js/net.js?v=8"></script>
+  <script src="js/ui.js?v=8"></script>
+  <script src="js/battle.js?v=8"></script>
+  <script src="js/world.js?v=8"></script>
+  <script src="js/main.js?v=8"></script>
 </body>
 </html>

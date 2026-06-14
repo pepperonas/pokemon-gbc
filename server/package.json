@@ -1,0 +1,15 @@
+{
+  "name": "pkmn-battle-server",
+  "version": "1.0.0",
+  "description": "Autoritativer WebSocket-Server für PvP-Kämpfe (Pokémon GBC Edition)",
+  "license": "MIT",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build:species": "node build-species.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

@@ -53,30 +53,8 @@ const Data = (() => {
     rock: '#b8a038', ghost: '#705898', dragon: '#7038f8',
   };
 
-  /**
-   * Kuratierter Move-Pool pro Typ (Gen-1-Power/Accuracy) mit Lern-Level `l`
-   * und optionalem Status-Nebeneffekt `fx: { s: psn|brn|par|frz, c: %Chance }`
-   * (Gen-1-nahe Werte: Bodyslam 30% PAR, Lecker 30% PAR, Feuer 10% BRN …).
-   * Abkürzungen: kein PP-System, "Nachtnebel" & "Drachenwut" (eigentlich
-   * Fix-Schaden) sind hier als normale Power-Moves vereinfacht.
-   */
-  const MOVE_POOL = {
-    normal:   [{ n: 'Tackle', p: 35, a: 95, l: 1 }, { n: 'Kratzer', p: 40, a: 100, l: 10 }, { n: 'Bodyslam', p: 85, a: 100, l: 22, fx: { s: 'par', c: 30 } }, { n: 'Hyperstrahl', p: 150, a: 90, l: 35 }],
-    fire:     [{ n: 'Glut', p: 40, a: 100, l: 1, fx: { s: 'brn', c: 10 } }, { n: 'Feuerzahn', p: 65, a: 95, l: 10, fx: { s: 'brn', c: 10 } }, { n: 'Flammenwurf', p: 95, a: 100, l: 22, fx: { s: 'brn', c: 10 } }, { n: 'Feuersturm', p: 120, a: 85, l: 35, fx: { s: 'brn', c: 10 } }],
-    water:    [{ n: 'Aquaknarre', p: 40, a: 100, l: 1 }, { n: 'Blubbstrahl', p: 65, a: 100, l: 10 }, { n: 'Surfer', p: 95, a: 100, l: 22 }, { n: 'Hydropumpe', p: 120, a: 80, l: 35 }],
-    grass:    [{ n: 'Rankenhieb', p: 35, a: 100, l: 1 }, { n: 'Rasierblatt', p: 55, a: 95, l: 10 }, { n: 'Blattgewirbel', p: 80, a: 100, l: 22 }, { n: 'Solarstrahl', p: 120, a: 100, l: 35 }],
-    electric: [{ n: 'Donnerschock', p: 40, a: 100, l: 1, fx: { s: 'par', c: 10 } }, { n: 'Funkensprung', p: 65, a: 100, l: 10, fx: { s: 'par', c: 30 } }, { n: 'Donnerblitz', p: 95, a: 100, l: 22, fx: { s: 'par', c: 10 } }, { n: 'Donner', p: 120, a: 70, l: 35, fx: { s: 'par', c: 10 } }],
-    ice:      [{ n: 'Eisschauer', p: 40, a: 100, l: 1, fx: { s: 'frz', c: 10 } }, { n: 'Aurorastrahl', p: 65, a: 100, l: 10 }, { n: 'Eisstrahl', p: 95, a: 100, l: 22, fx: { s: 'frz', c: 10 } }, { n: 'Blizzard', p: 120, a: 90, l: 35, fx: { s: 'frz', c: 10 } }],
-    fighting: [{ n: 'Fusstritt', p: 50, a: 90, l: 1 }, { n: 'Karateschlag', p: 50, a: 100, l: 10 }, { n: 'Ueberroller', p: 80, a: 80, l: 22 }, { n: 'Hochkick', p: 85, a: 90, l: 35 }],
-    poison:   [{ n: 'Giftstachel', p: 15, a: 100, l: 1, fx: { s: 'psn', c: 30 } }, { n: 'Saeure', p: 40, a: 100, l: 10 }, { n: 'Schlamm', p: 65, a: 100, l: 22, fx: { s: 'psn', c: 40 } }, { n: 'Giftschock', p: 90, a: 100, l: 35, fx: { s: 'psn', c: 40 } }],
-    ground:   [{ n: 'Sandgrab', p: 35, a: 90, l: 1 }, { n: 'Knochenkeule', p: 65, a: 85, l: 10 }, { n: 'Schaufler', p: 100, a: 100, l: 22 }, { n: 'Erdbeben', p: 100, a: 100, l: 35 }],
-    flying:   [{ n: 'Windstoss', p: 40, a: 100, l: 1 }, { n: 'Fluegelschlag', p: 60, a: 100, l: 10 }, { n: 'Bohrschnabel', p: 80, a: 100, l: 22 }, { n: 'Himmelsfeger', p: 140, a: 90, l: 35 }],
-    psychic:  [{ n: 'Konfusion', p: 50, a: 100, l: 1 }, { n: 'Psystrahl', p: 65, a: 100, l: 10 }, { n: 'Psychokinese', p: 90, a: 100, l: 22 }, { n: 'Traumfresser', p: 100, a: 100, l: 35 }],
-    bug:      [{ n: 'Duonadel', p: 25, a: 100, l: 1, fx: { s: 'psn', c: 20 } }, { n: 'Kaeferbiss', p: 60, a: 100, l: 10 }, { n: 'Anfallspin', p: 75, a: 95, l: 22 }, { n: 'Megasauger', p: 80, a: 100, l: 35 }],
-    rock:     [{ n: 'Steinwurf', p: 50, a: 65, l: 1 }, { n: 'Steinhagel', p: 75, a: 90, l: 10 }, { n: 'Felsbrecher', p: 90, a: 90, l: 22 }, { n: 'Steinkante', p: 100, a: 80, l: 35 }],
-    ghost:    [{ n: 'Lecker', p: 20, a: 100, l: 1, fx: { s: 'par', c: 30 } }, { n: 'Nachtnebel', p: 60, a: 100, l: 10 }, { n: 'Schattenstoss', p: 80, a: 100, l: 22 }, { n: 'Spuksturm', p: 95, a: 95, l: 35 }],
-    dragon:   [{ n: 'Drachenwut', p: 50, a: 100, l: 1 }, { n: 'Drachenatem', p: 60, a: 100, l: 10, fx: { s: 'par', c: 30 } }, { n: 'Drachenstoss', p: 85, a: 95, l: 22 }, { n: 'Drachenpuls', p: 100, a: 100, l: 35 }],
-  };
+  // (Move-Pool & movesFor leben jetzt in js/battle-core.js — eine Quelle der
+  //  Wahrheit für Solo UND den PvP-Server. Data.movesFor delegiert dorthin.)
 
   // ------------------------------------------------------------- Items ---
   // Katalog aller Items (Märkte, Kampf- und Beutel-Menü).
@@ -179,23 +157,11 @@ const Data = (() => {
   }
 
   /**
-   * Typgerechtes Moveset (max. 4) für eine Spezies auf gegebenem Level:
-   * Es zählen nur Attacken mit Lern-Level <= level; davon die stärksten.
-   * Mono-Typ: 3 Typ-Moves + Tackle · Dual-Typ: je 2 Moves pro Typ.
+   * Typgerechtes Moveset (max. 4) — delegiert an BattleCore.movesFor
+   * (eine Quelle der Wahrheit für Solo UND den PvP-Server).
    */
   function movesFor(species, level = 50) {
-    const moves = [];
-    const perType = species.types.length > 1 ? 2 : 3;
-    for (const t of species.types) {
-      const pool = (MOVE_POOL[t] || MOVE_POOL.normal).filter(m => m.l <= level);
-      for (const m of pool.slice(-perType)) {
-        moves.push({ name: m.n, type: t, power: m.p, acc: m.a, fx: m.fx });
-      }
-    }
-    if (moves.length < 4 && !moves.some(m => m.type === 'normal')) {
-      moves.push({ name: 'Tackle', type: 'normal', power: 35, acc: 95 });
-    }
-    return moves.slice(0, 4);
+    return BattleCore.movesFor(species, level);
   }
 
   /**

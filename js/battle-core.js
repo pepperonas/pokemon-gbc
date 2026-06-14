@@ -178,10 +178,160 @@
     return Math.min(0.95, Math.max(0.1, c));
   }
 
+  // ------------------------------------------------------- Attacken-Pool ---
+  // Kuratierter Move-Pool pro Typ (Gen-1-Power/Accuracy) mit Lern-Level `l`
+  // und optionalem Status-Nebeneffekt `fx: { s, c }`. Eine Quelle der Wahrheit
+  // für Solo (Data.movesFor delegiert hierher) UND den PvP-Server.
+  const MOVE_POOL = {
+    normal:   [{ n: 'Tackle', p: 35, a: 95, l: 1 }, { n: 'Kratzer', p: 40, a: 100, l: 10 }, { n: 'Bodyslam', p: 85, a: 100, l: 22, fx: { s: 'par', c: 30 } }, { n: 'Hyperstrahl', p: 150, a: 90, l: 35 }],
+    fire:     [{ n: 'Glut', p: 40, a: 100, l: 1, fx: { s: 'brn', c: 10 } }, { n: 'Feuerzahn', p: 65, a: 95, l: 10, fx: { s: 'brn', c: 10 } }, { n: 'Flammenwurf', p: 95, a: 100, l: 22, fx: { s: 'brn', c: 10 } }, { n: 'Feuersturm', p: 120, a: 85, l: 35, fx: { s: 'brn', c: 10 } }],
+    water:    [{ n: 'Aquaknarre', p: 40, a: 100, l: 1 }, { n: 'Blubbstrahl', p: 65, a: 100, l: 10 }, { n: 'Surfer', p: 95, a: 100, l: 22 }, { n: 'Hydropumpe', p: 120, a: 80, l: 35 }],
+    grass:    [{ n: 'Rankenhieb', p: 35, a: 100, l: 1 }, { n: 'Rasierblatt', p: 55, a: 95, l: 10 }, { n: 'Blattgewirbel', p: 80, a: 100, l: 22 }, { n: 'Solarstrahl', p: 120, a: 100, l: 35 }],
+    electric: [{ n: 'Donnerschock', p: 40, a: 100, l: 1, fx: { s: 'par', c: 10 } }, { n: 'Funkensprung', p: 65, a: 100, l: 10, fx: { s: 'par', c: 30 } }, { n: 'Donnerblitz', p: 95, a: 100, l: 22, fx: { s: 'par', c: 10 } }, { n: 'Donner', p: 120, a: 70, l: 35, fx: { s: 'par', c: 10 } }],
+    ice:      [{ n: 'Eisschauer', p: 40, a: 100, l: 1, fx: { s: 'frz', c: 10 } }, { n: 'Aurorastrahl', p: 65, a: 100, l: 10 }, { n: 'Eisstrahl', p: 95, a: 100, l: 22, fx: { s: 'frz', c: 10 } }, { n: 'Blizzard', p: 120, a: 90, l: 35, fx: { s: 'frz', c: 10 } }],
+    fighting: [{ n: 'Fusstritt', p: 50, a: 90, l: 1 }, { n: 'Karateschlag', p: 50, a: 100, l: 10 }, { n: 'Ueberroller', p: 80, a: 80, l: 22 }, { n: 'Hochkick', p: 85, a: 90, l: 35 }],
+    poison:   [{ n: 'Giftstachel', p: 15, a: 100, l: 1, fx: { s: 'psn', c: 30 } }, { n: 'Saeure', p: 40, a: 100, l: 10 }, { n: 'Schlamm', p: 65, a: 100, l: 22, fx: { s: 'psn', c: 40 } }, { n: 'Giftschock', p: 90, a: 100, l: 35, fx: { s: 'psn', c: 40 } }],
+    ground:   [{ n: 'Sandgrab', p: 35, a: 90, l: 1 }, { n: 'Knochenkeule', p: 65, a: 85, l: 10 }, { n: 'Schaufler', p: 100, a: 100, l: 22 }, { n: 'Erdbeben', p: 100, a: 100, l: 35 }],
+    flying:   [{ n: 'Windstoss', p: 40, a: 100, l: 1 }, { n: 'Fluegelschlag', p: 60, a: 100, l: 10 }, { n: 'Bohrschnabel', p: 80, a: 100, l: 22 }, { n: 'Himmelsfeger', p: 140, a: 90, l: 35 }],
+    psychic:  [{ n: 'Konfusion', p: 50, a: 100, l: 1 }, { n: 'Psystrahl', p: 65, a: 100, l: 10 }, { n: 'Psychokinese', p: 90, a: 100, l: 22 }, { n: 'Traumfresser', p: 100, a: 100, l: 35 }],
+    bug:      [{ n: 'Duonadel', p: 25, a: 100, l: 1, fx: { s: 'psn', c: 20 } }, { n: 'Kaeferbiss', p: 60, a: 100, l: 10 }, { n: 'Anfallspin', p: 75, a: 95, l: 22 }, { n: 'Megasauger', p: 80, a: 100, l: 35 }],
+    rock:     [{ n: 'Steinwurf', p: 50, a: 65, l: 1 }, { n: 'Steinhagel', p: 75, a: 90, l: 10 }, { n: 'Felsbrecher', p: 90, a: 90, l: 22 }, { n: 'Steinkante', p: 100, a: 80, l: 35 }],
+    ghost:    [{ n: 'Lecker', p: 20, a: 100, l: 1, fx: { s: 'par', c: 30 } }, { n: 'Nachtnebel', p: 60, a: 100, l: 10 }, { n: 'Schattenstoss', p: 80, a: 100, l: 22 }, { n: 'Spuksturm', p: 95, a: 95, l: 35 }],
+    dragon:   [{ n: 'Drachenwut', p: 50, a: 100, l: 1 }, { n: 'Drachenatem', p: 60, a: 100, l: 10, fx: { s: 'par', c: 30 } }, { n: 'Drachenstoss', p: 85, a: 95, l: 22 }, { n: 'Drachenpuls', p: 100, a: 100, l: 35 }],
+  };
+
+  /** Typgerechtes Moveset (max. 4) für eine Spezies auf gegebenem Level. */
+  function movesFor(species, level = 50) {
+    const moves = [];
+    const perType = species.types.length > 1 ? 2 : 3;
+    for (const t of species.types) {
+      const pool = (MOVE_POOL[t] || MOVE_POOL.normal).filter(m => m.l <= level);
+      for (const m of pool.slice(-perType)) {
+        moves.push({ name: m.n, type: t, power: m.p, acc: m.a, fx: m.fx });
+      }
+    }
+    if (moves.length < 4 && !moves.some(m => m.type === 'normal')) {
+      moves.push({ name: 'Tackle', type: 'normal', power: 35, acc: 95 });
+    }
+    return moves.slice(0, 4);
+  }
+
+  // ====================================== PvP-Turn-Resolver (autoritativ) ===
+  // Reiner, deterministischer Rundenrechner für 2-Spieler-Kämpfe. Erzeugt eine
+  // Event-Liste, die Server und beide Clients identisch abspielen. Aktionen:
+  //   { kind:'move', move:<idx> }  ·  { kind:'switch', to:<idx> }
+  // (Items sind in PvP v1 bewusst nicht vorgesehen — wie klassische Link-Kämpfe.)
+  const STATUS_IMMUNE = { psn: 'poison', brn: 'fire', frz: 'ice' };
+  const effSpe = mon => mon.status === 'par' ? Math.floor(mon.stats.spe / 4) : mon.stats.spe;
+  const activeOf = (st, s) => st.sides[s].team[st.sides[s].active];
+
+  /** Kampf-Mon aus Spezies-Daten + Level erzeugen (Server-Autorität). */
+  function makeBattleMon(species, level) {
+    const stats = calcStats(species.base, level);
+    return {
+      id: species.id, level, stats, hp: stats.hp, status: null,
+      species: { types: species.types.slice(), base: species.base },
+      moves: movesFor(species, level),
+    };
+  }
+
+  function makeBattleState(teamA, teamB) {
+    return {
+      sides: [{ team: teamA, active: 0 }, { team: teamB, active: 0 }],
+      turn: 0, winner: null, pendingSwitch: [false, false],
+    };
+  }
+
+  function doMove(state, atkSide, moveIdx, rng, events) {
+    const att = activeOf(state, atkSide), def = activeOf(state, 1 - atkSide);
+    if (att.hp <= 0) return;
+    if (att.status === 'frz') {
+      if (rng() < 0.2) { att.status = null; events.push({ e: 'thaw', side: atkSide }); }
+      else { events.push({ e: 'frozen', side: atkSide }); return; }
+    }
+    if (att.status === 'par' && rng() < 0.25) { events.push({ e: 'fullpar', side: atkSide }); return; }
+    const move = att.moves[moveIdx] || att.moves[0];
+    events.push({ e: 'move', side: atkSide, move: move.name });
+    if (rng() * 100 >= move.acc) { events.push({ e: 'miss', side: atkSide }); return; }
+    const { dmg, typeEff, crit } = damage(att, def, move, rng);
+    if (typeEff === 0) { events.push({ e: 'immune', side: 1 - atkSide }); return; }
+    def.hp = Math.max(0, def.hp - dmg);
+    events.push({ e: 'damage', side: 1 - atkSide, to: def.hp, dmg, eff: typeEff, crit });
+    if (move.type === 'fire' && def.status === 'frz') { def.status = null; events.push({ e: 'thaw', side: 1 - atkSide }); }
+    if (move.fx && def.hp > 0 && !def.status) {
+      const immT = STATUS_IMMUNE[move.fx.s];
+      const immune = immT && def.species.types.includes(immT);
+      if (!immune && rng() * 100 < move.fx.c) { def.status = move.fx.s; events.push({ e: 'status', side: 1 - atkSide, status: move.fx.s }); }
+    }
+    if (def.hp <= 0) events.push({ e: 'faint', side: 1 - atkSide });
+  }
+
+  function checkFaintWin(state, events) {
+    for (let s = 0; s < 2; s++) {
+      const sd = state.sides[s];
+      if (sd.team[sd.active].hp > 0) continue;
+      if (sd.team.some(m => m.hp > 0)) {
+        if (!state.pendingSwitch[s]) { state.pendingSwitch[s] = true; events.push({ e: 'forceswitch', side: s }); }
+      } else if (state.winner == null) {
+        state.winner = 1 - s; events.push({ e: 'win', side: 1 - s });
+      }
+    }
+  }
+
+  /** Erzwungenen Wechsel (nach K.O.) anwenden; liefert die Switch-Events. */
+  function applyForcedSwitch(state, side, toIndex) {
+    const sd = state.sides[side];
+    sd.active = toIndex;
+    state.pendingSwitch[side] = false;
+    const mon = sd.team[toIndex];
+    return [{ e: 'switch', side, mon: toIndex, id: mon.id, hp: mon.hp, maxHp: mon.stats.hp, status: mon.status, level: mon.level }];
+  }
+
+  /**
+   * Eine Runde auflösen. actions = [a0, a1]. Reihenfolge: Wechsel zuerst
+   * (Seite 0 dann 1), dann Angriffe nach effektiver Initiative (Gleichstand
+   * per RNG), dann Gift-/Brand-Restschaden. Mutiert `state`, gibt { events }.
+   */
+  function resolveTurn(state, actions, rng) {
+    const events = [];
+    state.turn++;
+    for (let s = 0; s < 2; s++) {
+      if (actions[s] && actions[s].kind === 'switch') {
+        const to = actions[s].to;
+        state.sides[s].active = to;
+        const mon = state.sides[s].team[to];
+        events.push({ e: 'switch', side: s, mon: to, id: mon.id, hp: mon.hp, maxHp: mon.stats.hp, status: mon.status, level: mon.level });
+      }
+    }
+    const movers = [0, 1].filter(s => actions[s] && actions[s].kind === 'move');
+    movers.sort((a, b) => {
+      const sa = effSpe(activeOf(state, a)), sb = effSpe(activeOf(state, b));
+      if (sa !== sb) return sb - sa;
+      return rng() < 0.5 ? -1 : 1;
+    });
+    for (const s of movers) {
+      if (state.winner != null) break;
+      doMove(state, s, actions[s].move, rng, events);
+      checkFaintWin(state, events);
+      if (state.winner != null) return { events };
+    }
+    for (let s = 0; s < 2; s++) {
+      const m = activeOf(state, s);
+      if (m.hp > 0 && (m.status === 'psn' || m.status === 'brn')) {
+        const d = Math.max(1, Math.floor(m.stats.hp / 16));
+        m.hp = Math.max(0, m.hp - d);
+        events.push({ e: 'statusdmg', side: s, to: m.hp, status: m.status });
+      }
+    }
+    checkFaintWin(state, events);
+    return { events };
+  }
+
   return {
-    CHART, SPECIAL, EVO, IV,
-    effectiveness, calcStats, expFor,
+    CHART, SPECIAL, EVO, IV, MOVE_POOL,
+    effectiveness, calcStats, expFor, movesFor,
     mulberry32, makeRng,
     damage, catchChance,
+    makeBattleMon, makeBattleState, resolveTurn, applyForcedSwitch, effSpe,
   };
 });

@@ -31,7 +31,7 @@
 - **Attacken-Lernen** — beim Level-Up werden stärkere typgerechte Attacken freigeschaltet.
 - **Komplette Spielwelt mit begehbaren Innenräumen** — 2 Dörfer, 2 Städte, 4 Routen, eine Höhle, der Siegesweg, NATURPARK & DRACHENTAL sowie die Story-Region NEBELWALD + SCHATTENVERSTECK — 17 Maps insgesamt: Arenen, Poké-Center, Märkte und dein Zuhause sind echte Innenräume mit Warp-Türen (Overworld: 72×60 Tiles, alles prozedural gezeichnet).
 - **Story: TEAM SCHATTEN** — ab STEINSTADT führt ein Waldpfad in den NEBELWALD. Dein Rivale SILAS versperrt den Pfad, zwei Rüpel lauern im Gras, und tief im SCHATTENVERSTECK wartet BOSS NOX. Sein Sturz belohnt dich mit einem **MEISTERBALL** (fängt garantiert).
-- **Online-Kampf (Vorschau)** — Pausenmenü → ONLINE: Lobby im offiziellen GBC-Look mit Schnellkampf, privaten Räumen (4-stelliger Code) und Code-Beitritt. Der autoritative WebSocket-Server ist in [`MULTIPLAYER_PLAN.md`](MULTIPLAYER_PLAN.md) spezifiziert (Mock-Transport bis Phase P1).
+- **Online-PvP (live)** — Pausenmenü → ONLINE: Lobby im offiziellen GBC-Look mit **Schnellkampf**, privaten **Räumen** (4-stelliger Code) und Code-Beitritt; danach ein synchroner Trainerkampf gegen echte Spieler über `wss://pokemon.celox.io/ws`. Der Server ist **autoritativ** (Node + ws): er berechnet Stats/Schaden/RNG selbst mit der geteilten Engine (`battle-core.js`) — Cheating via manipuliertem Spielstand ist wirkungslos. Architektur & Protokoll: [`MULTIPLAYER_PLAN.md`](MULTIPLAYER_PLAN.md).
 - **2 echte Arenen** — mit Arena-Trainern im Inneren und Rocko (Gestein) bzw. Misty (Wasser) als Leiter mit schlauer Typ-KI; Orden als Belohnung.
 - **Pokémon-Liga als Gauntlet** — Top 4 (Lorelei/Eis, Bruno/Kampf, Agathe/Geist, Siegfried/Drache, L51–56) blockieren nacheinander den Weg zum Champion Blau (6er-Team bis L60). Zutritt nur mit beiden Orden.
 - **Statuseffekte** — Gift, Verbrennung, Paralyse, Gefrieren mit Gen-1-Mechanik: 1/16-Rundenschaden, Brand halbiert den phys. Angriff, Paralyse viertelt Initiative + 25 % Ausfall, Feuer taut auf, Typ-Immunitäten.
@@ -121,7 +121,8 @@ Ja — **alles liegt in `localStorage`**:
 | `js/battle.js` | Typen-Tabelle, Schadensformel, Stats/EXP, Statuseffekte, Evolutionstabelle, Fangen (3 Ball-Stufen), Preisgeld, smarte Leiter-KI, kompletter Kampfbildschirm (wild + Trainer) |
 | `js/world.js` | Multi-Map-System (Overworld 72×60 + 11 Interiors per ASCII-Layout), Warps, Zonen-Encounter, Sicht-Trainer, Arenen, Liga-Gauntlet, Tore, Legendäre, prozedurale Tiles & Charsets |
 | `js/ui.js` | Textbox/Menü-Helfer, Titel, Starterwahl, Pausenmenü, Team, Beutel, Markt, Box, Pokédex, Online-Lobby (Schnellkampf/Raum/Code) |
-| `js/net.js` | Online-Transport-Abstraktion + Mock (Trainer-ID, Raum-Codes); WebSocket-Anbindung folgt laut `MULTIPLAYER_PLAN.md` |
+| `js/net.js` | Online-Transport: WebSocket-Client (Trainer-ID, Matchmaking, Raum-Codes) + Mock-Fallback |
+| `server/` | Autoritativer PvP-WebSocket-Server (Node + ws): Matchmaking, Räume, Team-Validierung, Turn-Loop. Nutzt `battle-core.js` + `species.json`. Deploy: systemd `pkmn-battle` + nginx-`/ws`-Proxy (Details in `MULTIPLAYER_PLAN.md`) |
 | `js/battle-core.js` | **Isomorphe** Gen-1-Kampflogik (Typentabelle, Stats, EXP, Schaden, Fangen, Evolutionen) mit **seedbarer RNG** — eine Quelle der Wahrheit für Solo & den künftigen PvP-Server (Browser-Global + Node-`require`) |
 | `js/sound.js` | GBC-artige WebAudio-SFX (Square/Triangle-Bleeps), Mute-Toggle |
 | `js/main.js` | Game-Loop, Screen-Stack, Eingaben (Tastatur + Touch), Speichern/Laden mit Migration, pixel-perfekte Skalierung |
