@@ -21,7 +21,7 @@ const UI = (() => {
   }
 
   /** Text mit Umbruch nach maxChars Zeichen (lange Wörter werden hart getrennt). */
-  function textWrapped(ctx, str, x, y, maxChars, lineH = 10) {
+  function textWrapped(ctx, str, x, y, maxChars, lineH = 10, color = INK) {
     const lines = [];
     let line = '';
     for (const word of String(str).split(' ')) {
@@ -36,7 +36,7 @@ const UI = (() => {
       } else { lines.push(line); line = w; }
     }
     if (line) lines.push(line);
-    lines.forEach((l, i) => text(ctx, l, x, y + i * lineH));
+    lines.forEach((l, i) => text(ctx, l, x, y + i * lineH, color));
   }
 
   /** Klassische GB-Box: weiße Fläche mit Doppelrahmen. */
@@ -1024,6 +1024,16 @@ const UI = (() => {
     update(dt) {
       if (this.note && (this.note.t -= dt) <= 0) this.note = null;
       if (this.busy) return;
+      if (this.warn) {                         // Code-Stand hat MEHR Fortschritt
+        if (Input.take('up') || Input.take('down')) { this.warnYes = !this.warnYes; Sound.cursor(); }
+        if (Input.take('a')) {
+          Sound.confirm();
+          if (this.warnYes) { this.warn = false; this.busy = true; Net.uploadSave(Net.syncCode(), Game.exportSave(), true).then(() => { this.busy = false; this.flash('Ueberschrieben.'); }).catch(() => { this.busy = false; this.flash('Fehler.'); }); }
+          else this.warn = false;
+        }
+        if (Input.take('b')) this.warn = false;
+        return;
+      }
       const n = this.items.length;
       if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
       if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
@@ -1037,7 +1047,7 @@ const UI = (() => {
           this.busy = true; this.flash('Lade hoch...');
           Net.uploadSave(Net.syncCode(), Game.exportSave())
             .then(() => { this.busy = false; this.flash('Hochgeladen unter ' + Net.syncCode() + '!'); })
-            .catch(() => { this.busy = false; this.flash('Server nicht erreichbar.'); });
+            .catch(e => { this.busy = false; if (e === 'less-progress') { this.warnYes = false; this.warn = true; } else this.flash('Server nicht erreichbar.'); });
         } else if (c === 'LADEN') { Game.push(new CloudLoadScreen()); }
       }
     }
@@ -1053,7 +1063,11 @@ const UI = (() => {
       });
       text(ctx, 'Code notieren!', 8, 102, '#787878');
       text(ctx, '2.Geraet: LADEN', 8, 111, '#787878');
-      if (this.note) { box(ctx, 4, 120, 152, 22); textWrapped(ctx, this.note.text, 10, 127, 18); }
+      if (this.warn) {
+        box(ctx, 8, 56, 144, 60);
+        textWrapped(ctx, 'Code-Stand hat MEHR Fortschritt. Ueberschreiben?', 14, 62, 17);
+        text(ctx, this.warnYes ? '>JA   NEIN' : ' JA  >NEIN', 14, 104);
+      } else if (this.note) { box(ctx, 4, 120, 152, 22); textWrapped(ctx, this.note.text, 10, 127, 18); }
     }
   }
 
@@ -1080,7 +1094,7 @@ const UI = (() => {
       if (Input.take('a')) {
         Sound.confirm(); this.phase = 'loading'; this.flash('Lade...');
         Net.downloadSave(this.code())
-          .then(d => { this.data = d; this.confYes = true; this.phase = 'confirm'; })
+          .then(d => { this.data = d; this.warnLoad = Net.caughtCountOf(d.save) < Net.caughtCountOf(Game.readRawSave()); this.confYes = !this.warnLoad; this.phase = 'confirm'; })
           .catch(e => { this.phase = 'input'; this.flash(e === 'not-found' ? 'Kein Stand zu diesem Code.' : 'Server nicht erreichbar.'); });
       }
     }
@@ -1093,12 +1107,13 @@ const UI = (() => {
         if (i === this.pos && this.phase === 'input') { text(ctx, '^', x + 6, 32); text(ctx, 'v', x + 6, 64); }
       }
       if (this.phase === 'confirm' && this.data) {
-        box(ctx, 8, 74, 144, 54);
+        box(ctx, 8, 72, 144, 60);
         const d = new Date(this.data.updated_at), p2 = x => String(x).padStart(2, '0');
-        text(ctx, 'Gefunden! Stand vom', 14, 80);
-        text(ctx, p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '. ' + p2(d.getHours()) + ':' + p2(d.getMinutes()), 14, 92);
-        text(ctx, 'Lokal ersetzen?', 14, 105);
-        text(ctx, this.confYes ? '>JA   NEIN' : ' JA  >NEIN', 14, 117);
+        text(ctx, 'Gefunden! Stand vom', 14, 78);
+        text(ctx, p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '. ' + p2(d.getHours()) + ':' + p2(d.getMinutes()), 14, 90);
+        if (this.warnLoad) text(ctx, 'WENIGER Fortschritt!', 14, 102, '#c03028');
+        text(ctx, 'Lokal ersetzen?', 14, 113, INK);
+        text(ctx, this.confYes ? '>JA   NEIN' : ' JA  >NEIN', 14, 124);
       } else {
         text(ctx, 'A: Laden   B: Zurueck', 8, 110, '#787878');
         if (this.note) { box(ctx, 4, 120, 152, 22); textWrapped(ctx, this.note.text, 10, 127, 18); }
@@ -1122,7 +1137,7 @@ const UI = (() => {
           else this.finish(null);
         } else if (!local) { Game.writeRawSave(remote.save); this.finish('Konto-Spielstand geladen!'); }
         else if (remote.save === local) this.finish(null);
-        else { this.remote = remote; this.phase = 'conflict'; }
+        else { this.remote = remote; this.confYes = Net.caughtCountOf(local) >= Net.caughtCountOf(remote.save); this.phase = 'conflict'; }
       }).catch(() => this.finish(null));
     }
     finish(msg) { if (msg) { this.msg = msg; this.phase = 'msg'; } else this.toTitle(); }
@@ -1134,8 +1149,8 @@ const UI = (() => {
         if (Input.take('up') || Input.take('down')) { this.confYes = !this.confYes; Sound.cursor(); }
         if (Input.take('a')) {
           Sound.confirm();
-          if (this.confYes) Net.accountUploadSave(Game.readRawSave()).catch(() => {});   // lokal behalten -> hochladen
-          else Game.writeRawSave(this.remote.save);                                       // Konto laden
+          if (this.confYes) Net.accountUploadSave(Game.readRawSave(), true).catch(() => {});   // lokal behalten -> bewusst überschreiben
+          else Game.writeRawSave(this.remote.save);                                            // Konto laden
           this.toTitle();
         }
         return;
@@ -1146,14 +1161,15 @@ const UI = (() => {
       ctx.fillStyle = '#283050'; ctx.fillRect(0, 0, 160, 144);
       text(ctx, 'KONTO-SYNC', 8, 8, '#f8d030');
       if (this.phase === 'conflict') {
-        const d = new Date(this.remote.updated_at), p2 = x => String(x).padStart(2, '0');
-        textWrapped(ctx, 'Lokaler UND Konto-Stand vorhanden:', 8, 24, 18);
-        text(ctx, 'Konto: ' + p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '. ' + p2(d.getHours()) + ':' + p2(d.getMinutes()), 8, 56, '#a8b8d8');
+        const lc = Net.caughtCountOf(Game.readRawSave()), rc = Net.caughtCountOf(this.remote.save);
+        textWrapped(ctx, 'Beide Staende vorhanden:', 8, 24, 18, 10, '#a8b8d8');
+        text(ctx, 'Lokal:' + lc + ' Konto:' + rc, 8, 44, '#f8d030');
+        text(ctx, '(gefangene Pokemon)', 8, 56, '#68789a');
         text(ctx, (this.confYes ? '>' : ' ') + 'LOKAL behalten', 8, 78, '#f8f8f8');
         text(ctx, (this.confYes ? ' ' : '>') + 'KONTO laden', 8, 90, '#f8f8f8');
-        text(ctx, 'LOKAL = dein jetziger Stand', 8, 112, '#68789a');
+        text(ctx, 'mehr = mehr Fortschritt', 8, 112, '#68789a');
       } else {
-        text(ctx, this.phase === 'sync' ? ('Synchronisiere' + dots(this.t)) : this.msg, 8, 50, '#a8b8d8');
+        textWrapped(ctx, this.phase === 'sync' ? ('Synchronisiere' + dots(this.t)) : this.msg, 8, 40, 18, 11, '#a8b8d8');
         if (this.phase === 'msg') text(ctx, 'A: Weiter', 8, 122, '#68789a');
       }
     }
@@ -1173,6 +1189,16 @@ const UI = (() => {
         if (Input.take('b')) this.phase = 'menu';
         return;
       }
+      if (this.phase === 'uploadwarn') {       // Konto-Stand hat MEHR Fortschritt
+        if (Input.take('up') || Input.take('down')) { this.confYes = !this.confYes; Sound.cursor(); }
+        if (Input.take('a')) {
+          Sound.confirm();
+          if (this.confYes) { this.phase = 'busy'; Net.accountUploadSave(Game.exportSave(), true).then(() => { this.phase = 'menu'; this.flash('Konto-Stand ueberschrieben.'); }).catch(() => { this.phase = 'menu'; this.flash('Fehler beim Hochladen.'); }); }
+          else this.phase = 'menu';
+        }
+        if (Input.take('b')) this.phase = 'menu';
+        return;
+      }
       const n = this.items.length;
       if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
       if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
@@ -1185,11 +1211,16 @@ const UI = (() => {
         else if (c === 'STAND HOCHLADEN') {
           this.phase = 'busy'; this.flash('Lade hoch...');
           Net.accountUploadSave(Game.exportSave()).then(() => { this.phase = 'menu'; this.flash('In dein Konto gesichert!'); })
-            .catch(e => { this.phase = 'menu'; this.flash(e === 'auth' ? 'Sitzung abgelaufen - neu anmelden.' : 'Server nicht erreichbar.'); });
+            .catch(e => {
+              if (e === 'less-progress') { this.confYes = false; this.phase = 'uploadwarn'; }   // nicht still ueberschreiben
+              else { this.phase = 'menu'; this.flash(e === 'auth' ? 'Sitzung abgelaufen - neu anmelden.' : 'Server nicht erreichbar.'); }
+            });
         } else if (c === 'STAND LADEN') {
           this.phase = 'busy'; this.flash('Lade...');
-          Net.accountDownloadSave().then(d => { if (d) { this.data = d; this.confYes = true; this.phase = 'confirm'; } else { this.phase = 'menu'; this.flash('Kein Konto-Stand vorhanden.'); } })
-            .catch(e => { this.phase = 'menu'; this.flash(e === 'auth' ? 'Sitzung abgelaufen.' : 'Server nicht erreichbar.'); });
+          Net.accountDownloadSave().then(d => {
+            if (d) { this.data = d; this.warnLoad = Net.caughtCountOf(d.save) < Net.caughtCountOf(Game.readRawSave()); this.confYes = !this.warnLoad; this.phase = 'confirm'; }
+            else { this.phase = 'menu'; this.flash('Kein Konto-Stand vorhanden.'); }
+          }).catch(e => { this.phase = 'menu'; this.flash(e === 'auth' ? 'Sitzung abgelaufen.' : 'Server nicht erreichbar.'); });
         } else if (c === 'ABMELDEN') { Net.logout().finally(() => { this.rebuild(); this.flash('Abgemeldet.'); }); }
       }
     }
@@ -1199,12 +1230,17 @@ const UI = (() => {
       if (Net.isLoggedIn()) { text(ctx, 'Angemeldet als:', 8, 24, '#585858'); text(ctx, String(Net.accountName() || '').toUpperCase().slice(0, 14), 8, 34, '#3878c8'); }
       else { text(ctx, 'Nicht angemeldet.', 8, 26, '#585858'); text(ctx, 'Login = Rangliste +', 8, 40, '#787878'); text(ctx, 'Konto-Sync (kein Code).', 8, 50, '#787878'); }
       if (this.phase === 'confirm' && this.data) {
-        box(ctx, 8, 60, 144, 54);
+        box(ctx, 8, 58, 144, 62);
         const d = new Date(this.data.updated_at), p2 = x => String(x).padStart(2, '0');
-        text(ctx, 'Konto-Stand vom', 14, 66);
-        text(ctx, p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '. ' + p2(d.getHours()) + ':' + p2(d.getMinutes()), 14, 78);
-        text(ctx, 'Lokal ersetzen?', 14, 91);
-        text(ctx, this.confYes ? '>JA   NEIN' : ' JA  >NEIN', 14, 103);
+        text(ctx, 'Konto-Stand vom', 14, 64);
+        text(ctx, p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '. ' + p2(d.getHours()) + ':' + p2(d.getMinutes()), 14, 75);
+        if (this.warnLoad) text(ctx, 'WENIGER Fortschritt!', 14, 87, '#c03028');
+        text(ctx, 'Lokal ersetzen?', 14, 98);
+        text(ctx, this.confYes ? '>JA   NEIN' : ' JA  >NEIN', 14, 109);
+      } else if (this.phase === 'uploadwarn') {
+        box(ctx, 8, 58, 144, 62);
+        textWrapped(ctx, 'Konto-Stand hat MEHR Fortschritt. Ueberschreiben?', 14, 64, 17);
+        text(ctx, this.confYes ? '>JA   NEIN' : ' JA  >NEIN', 14, 106);
       } else {
         this.items.forEach((it, i) => { const y = 66 + i * 12; if (i === this.index) text(ctx, '>', 8, y); text(ctx, it, 20, y); });
       }

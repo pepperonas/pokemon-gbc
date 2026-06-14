@@ -153,11 +153,13 @@ const Net = (() => {
     if (h === 'localhost' || h === '127.0.0.1' || h === '') return 'http://' + (h || 'localhost') + ':4250';
     return '';                      // same-origin via nginx /api
   }
-  async function uploadSave(code, saveStr) {
-    const r = await fetch(apiBase() + '/api/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, save: saveStr }) });
-    if (!r.ok) throw ((await r.json().catch(() => ({}))).error || 'http');
+  async function uploadSave(code, saveStr, force) {
+    const r = await fetch(apiBase() + '/api/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, save: saveStr, force: !!force }) });
+    if (!r.ok) throw ((await r.json().catch(() => ({}))).error || 'http');   // 409 -> 'less-progress'
     return r.json();                // { ok, updated_at }
   }
+  /** Anzahl gefangener Pokémon aus einem Save-String (für Fortschritts-Warnungen). */
+  function caughtCountOf(s) { try { const o = JSON.parse(s); return Array.isArray(o.caught) ? o.caught.length : 0; } catch (e) { return 0; } }
   async function downloadSave(code) {
     const r = await fetch(apiBase() + '/api/save?code=' + encodeURIComponent(code));
     if (r.status === 404) throw 'not-found';
@@ -185,10 +187,11 @@ const Net = (() => {
     localStorage.removeItem('pkmn_session'); localStorage.removeItem('pkmn_account_name');
     if (t) try { await fetch(apiBase() + '/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t }) }); } catch (e) {}
   }
-  async function accountUploadSave(saveStr) {
+  async function accountUploadSave(saveStr, force) {
     const t = session(); if (!t) throw 'noauth';
-    const r = await fetch(apiBase() + '/api/account/save', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t }, body: JSON.stringify({ save: saveStr }) });
-    if (r.status === 401) throw 'auth'; if (!r.ok) throw 'http';
+    const r = await fetch(apiBase() + '/api/account/save', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t }, body: JSON.stringify({ save: saveStr, force: !!force }) });
+    if (r.status === 401) throw 'auth';
+    if (!r.ok) throw ((await r.json().catch(() => ({}))).error || 'http');   // 409 -> 'less-progress'
     return r.json();
   }
   async function accountDownloadSave() {
@@ -226,7 +229,7 @@ const Net = (() => {
     available: hasWS,              // echter Server-Transport verfügbar
     trainerId, randomCode, makeTransport, CODE_CHARS, CLIENT_VER,
     pvpTeam: null,                 // optionales PvP-Team [{id,level}] (PvpTeamScreen)
-    syncCode, uploadSave, downloadSave, syncEnabled, setSyncEnabled,
+    syncCode, uploadSave, downloadSave, syncEnabled, setSyncEnabled, caughtCountOf,
     fetchLeaderboard, fetchRank, fetchReplays, fetchReplay,
     session, accountName, isLoggedIn, loginUrl, setSession, logout, accountUploadSave, accountDownloadSave,
   };

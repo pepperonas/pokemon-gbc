@@ -15,6 +15,18 @@ const CODE_RE = /^[A-Z2-9]{6}$/;
 const ID_RE = /^[\w-]{1,12}$/;
 const MAX_SAVE = 200000;          // 200 KB pro Stand
 const MAX_SAVES = 100000;         // globales Limit gegen Storage-Exhaustion
+
+// Fortschritts-Schutz: ein Stand mit WENIGER Fortschritt darf einen besseren
+// nicht still überschreiben. Maßstab: Anzahl gefangener Pokémon (monoton
+// steigend), dann Orden. So kann ein neues/leeres Spiel keinen vollen
+// Spielstand wegsynchronisieren.
+const caughtCount = s => (s && Array.isArray(s.caught)) ? s.caught.length : 0;
+function lessProgress(inc, exJson) {
+  let ex; try { ex = JSON.parse(exJson); } catch (e) { return false; }
+  const ci = caughtCount(inc), ce = caughtCount(ex);
+  if (ci !== ce) return ci < ce;
+  return (inc.badges || 0) < (ex.badges || 0);
+}
 const ALLOW_ORIGIN = /^https:\/\/pokemon\.celox\.io$|^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 module.exports = function createSync(db) {
@@ -76,7 +88,10 @@ module.exports = function createSync(db) {
         req.on('end', () => {
           let p; try { p = JSON.parse(body); } catch (e) { return json(400, { error: 'bad-json' }); }
           if (typeof p.save !== 'string' || p.save.length > MAX_SAVE) return json(400, { error: 'bad-save' });
-          try { JSON.parse(p.save); } catch (e) { return json(400, { error: 'bad-save' }); }
+          let obj; try { obj = JSON.parse(p.save); } catch (e) { return json(400, { error: 'bad-save' }); }
+          const existing = db.saveGet(key);
+          if (existing && !p.force && lessProgress(obj, existing.save_json))
+            return json(409, { error: 'less-progress', incomingCaught: caughtCount(obj), existingCaught: caughtCount(JSON.parse(existing.save_json)), updated_at: existing.updated_at });
           const updated_at = Date.now();
           db.savePut(key, p.save, updated_at);
           json(200, { ok: true, updated_at });
@@ -100,8 +115,11 @@ module.exports = function createSync(db) {
         const code = String(p.code || '').toUpperCase();
         if (!CODE_RE.test(code)) return json(400, { error: 'bad-code' });
         if (typeof p.save !== 'string' || p.save.length > MAX_SAVE) return json(400, { error: 'bad-save' });
-        try { JSON.parse(p.save); } catch (e) { return json(400, { error: 'bad-save' }); }
-        if (!db.saveGet(code) && db.saveCount() >= MAX_SAVES) return json(503, { error: 'full' });   // globales Cap
+        let obj; try { obj = JSON.parse(p.save); } catch (e) { return json(400, { error: 'bad-save' }); }
+        const existing = db.saveGet(code);
+        if (!existing && db.saveCount() >= MAX_SAVES) return json(503, { error: 'full' });   // globales Cap
+        if (existing && !p.force && lessProgress(obj, existing.save_json))
+          return json(409, { error: 'less-progress', incomingCaught: caughtCount(obj), existingCaught: caughtCount(JSON.parse(existing.save_json)), updated_at: existing.updated_at });
         const updated_at = Date.now();
         db.savePut(code, p.save, updated_at);
         json(200, { ok: true, updated_at });
