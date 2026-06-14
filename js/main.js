@@ -98,6 +98,10 @@ const Game = {
   /** Aktuellen Spielstand als JSON-String (für Cloud-Upload). */
   exportSave() { this.save(); return localStorage.getItem(SAVE_KEY); },
 
+  /** Roh-Zugriff auf den gespeicherten String (für Login-Sync ohne geladenen Spieler). */
+  readRawSave() { return localStorage.getItem(SAVE_KEY); },
+  writeRawSave(str) { if (str) localStorage.setItem(SAVE_KEY, str); },
+
   /** Heruntergeladenen Spielstand übernehmen und ins Spiel springen. */
   loadSaveString(str) {
     localStorage.setItem(SAVE_KEY, str);
@@ -201,10 +205,18 @@ const Game = {
     bindTouch();
     resize();
 
-    // Google-Login-Rücksprung: #sess=<token>&name=<name> auswerten + Hash entfernen
+    // Google-Login-Rücksprung: #sess nur akzeptieren, wenn die Nonce zu der
+    // passt, die DIESER Browser vor dem Login hinterlegt hat (gegen
+    // Session-Fixation / Login-CSRF via untergeschobenem Link).
+    let freshLogin = false;
     if (location.hash && location.hash.indexOf('sess=') >= 0) {
       const h = new URLSearchParams(location.hash.slice(1));
-      if (h.get('sess')) Net.setSession(h.get('sess'), h.get('name') || 'TRAINER');
+      const pending = localStorage.getItem('pkmn_oauth_pending');
+      localStorage.removeItem('pkmn_oauth_pending');
+      if (h.get('sess') && h.get('n') && pending && h.get('n') === pending) {
+        Net.setSession(h.get('sess'), h.get('name') || 'TRAINER');
+        freshLogin = true;
+      }
       history.replaceState(null, '', location.pathname + location.search);
     } else if (location.hash.indexOf('autherr') >= 0) {
       history.replaceState(null, '', location.pathname + location.search);
@@ -220,7 +232,8 @@ const Game = {
       await Data.load(p => { loading.progress = p; });
       // Starter-Sprites vorwärmen
       [1, 4, 7].forEach(id => Data.sprite(Data.byId(id).front));
-      Game.screens = [new UI.TitleScreen()];
+      // Frischer Login -> erst Konto-Sync abgleichen, sonst direkt Titel
+      Game.screens = [freshLogin ? new UI.LoginSyncScreen() : new UI.TitleScreen()];
     } catch (e) {
       console.error(e);
       loading.error = 'Laden fehlgeschlagen! Beim 1. Start wird Internet benoetigt. Bitte neu laden.';

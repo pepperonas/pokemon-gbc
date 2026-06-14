@@ -171,7 +171,14 @@ const Net = (() => {
   const session = () => localStorage.getItem('pkmn_session') || null;
   const accountName = () => localStorage.getItem('pkmn_account_name') || null;
   const isLoggedIn = () => !!session();
-  const loginUrl = () => apiBase() + '/api/auth/google';
+  // Login starten: one-time Nonce im Browser hinterlegen und mitschicken.
+  // Beim Rücksprung wird #sess nur akzeptiert, wenn die Nonce zurückkommt
+  // (verhindert Session-Fixation / Login-CSRF via untergeschobenem Link).
+  function loginUrl() {
+    const n = makeCode(8);
+    try { localStorage.setItem('pkmn_oauth_pending', n); } catch (e) {}
+    return apiBase() + '/api/auth/google?n=' + n;
+  }
   function setSession(token, name) { localStorage.setItem('pkmn_session', token); localStorage.setItem('pkmn_account_name', name || 'TRAINER'); }
   async function logout() {
     const t = session();

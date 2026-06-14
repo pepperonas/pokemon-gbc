@@ -44,16 +44,17 @@ module.exports = function createAuth(db, cfg) {
     if (u.pathname === '/api/auth/google' && req.method === 'GET') {
       if (!enabled) { res.writeHead(302, { Location: site + '#autherr=disabled' }); res.end(); return true; }
       const state = crypto.randomBytes(12).toString('hex');
-      states.set(state, Date.now() + 300000);
+      const nonce = (u.searchParams.get('n') || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16);
+      states.set(state, { exp: Date.now() + 300000, nonce });
       const url = AUTH_URL + '?' + new URLSearchParams({ client_id: cfg.clientId, redirect_uri: redirectUri, response_type: 'code', scope: 'openid email profile', state, access_type: 'online', prompt: 'select_account' });
       res.writeHead(302, { Location: url }); res.end(); return true;
     }
 
     if (u.pathname === '/api/auth/callback' && req.method === 'GET') {
       const code = u.searchParams.get('code'), state = u.searchParams.get('state');
-      const exp = states.get(state); states.delete(state);
-      for (const [k, v] of states) if (v < Date.now()) states.delete(k);
-      if (!enabled || !code || !exp || exp < Date.now()) { res.writeHead(302, { Location: site + '#autherr=1' }); res.end(); return true; }
+      const st = states.get(state); states.delete(state);
+      for (const [k, v] of states) if (v.exp < Date.now()) states.delete(k);
+      if (!enabled || !code || !st || st.exp < Date.now()) { res.writeHead(302, { Location: site + '#autherr=1' }); res.end(); return true; }
       try {
         const tok = await tokenExchange(code);
         const claims = tok.id_token && decodeJwt(tok.id_token);
@@ -62,7 +63,7 @@ module.exports = function createAuth(db, cfg) {
         db.upsertAccount({ sub: claims.sub, email: claims.email, name });
         const session = crypto.randomBytes(24).toString('base64url');
         db.createSession(session, claims.sub, name);
-        res.writeHead(302, { Location: site + '#sess=' + session + '&name=' + encodeURIComponent(name) }); res.end();
+        res.writeHead(302, { Location: site + '#sess=' + session + '&name=' + encodeURIComponent(name) + '&n=' + encodeURIComponent(st.nonce || '') }); res.end();
       } catch (e) { res.writeHead(302, { Location: site + '#autherr=1' }); res.end(); }
       return true;
     }

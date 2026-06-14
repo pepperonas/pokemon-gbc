@@ -1106,6 +1106,59 @@ const UI = (() => {
     }
   }
 
+  /**
+   * Direkt nach dem Login: lokalen Stand und Konto-Stand abgleichen.
+   *   Konto leer + lokal vorhanden -> lokal ins Konto übernehmen (Migration)
+   *   kein lokaler Stand          -> Konto-Stand laden (neues Gerät)
+   *   beide vorhanden & verschieden -> Auswahl (kein Datenverlust)
+   */
+  class LoginSyncScreen {
+    constructor() {
+      this.phase = 'sync'; this.msg = 'Synchronisiere Konto...'; this.t = 0; this.remote = null; this.confYes = true;
+      Net.accountDownloadSave().then(remote => {
+        const local = Game.readRawSave();
+        if (!remote) {
+          if (local) { Net.accountUploadSave(local).catch(() => {}); this.finish('Dein Spielstand wurde in dein Konto uebernommen!'); }
+          else this.finish(null);
+        } else if (!local) { Game.writeRawSave(remote.save); this.finish('Konto-Spielstand geladen!'); }
+        else if (remote.save === local) this.finish(null);
+        else { this.remote = remote; this.phase = 'conflict'; }
+      }).catch(() => this.finish(null));
+    }
+    finish(msg) { if (msg) { this.msg = msg; this.phase = 'msg'; } else this.toTitle(); }
+    toTitle() { Game.screens = [new TitleScreen()]; }
+    update(dt) {
+      this.t += dt;
+      if (this.phase === 'sync') return;
+      if (this.phase === 'conflict') {
+        if (Input.take('up') || Input.take('down')) { this.confYes = !this.confYes; Sound.cursor(); }
+        if (Input.take('a')) {
+          Sound.confirm();
+          if (this.confYes) Net.accountUploadSave(Game.readRawSave()).catch(() => {});   // lokal behalten -> hochladen
+          else Game.writeRawSave(this.remote.save);                                       // Konto laden
+          this.toTitle();
+        }
+        return;
+      }
+      if (this.phase === 'msg' && (Input.take('a') || Input.take('b'))) this.toTitle();
+    }
+    draw(ctx) {
+      ctx.fillStyle = '#283050'; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'KONTO-SYNC', 8, 8, '#f8d030');
+      if (this.phase === 'conflict') {
+        const d = new Date(this.remote.updated_at), p2 = x => String(x).padStart(2, '0');
+        textWrapped(ctx, 'Lokaler UND Konto-Stand vorhanden:', 8, 24, 18);
+        text(ctx, 'Konto: ' + p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '. ' + p2(d.getHours()) + ':' + p2(d.getMinutes()), 8, 56, '#a8b8d8');
+        text(ctx, (this.confYes ? '>' : ' ') + 'LOKAL behalten', 8, 78, '#f8f8f8');
+        text(ctx, (this.confYes ? ' ' : '>') + 'KONTO laden', 8, 90, '#f8f8f8');
+        text(ctx, 'LOKAL = dein jetziger Stand', 8, 112, '#68789a');
+      } else {
+        text(ctx, this.phase === 'sync' ? ('Synchronisiere' + dots(this.t)) : this.msg, 8, 50, '#a8b8d8');
+        if (this.phase === 'msg') text(ctx, 'A: Weiter', 8, 122, '#68789a');
+      }
+    }
+  }
+
   /** Google-Konto: anmelden (Rangliste-Identität + Konto-Sync) / abmelden. */
   class KontoScreen {
     constructor() { this.note = null; this.index = 0; this.phase = 'menu'; this.data = null; this.confYes = true; this.rebuild(); }
@@ -1364,6 +1417,6 @@ const UI = (() => {
     LoadingScreen, TitleScreen, StarterScreen, PauseMenuScreen,
     TeamScreen, BoxScreen, DexScreen, ItemScreen, MartScreen,
     OnlineScreen, OnlineSearchScreen, OnlineCodeScreen, OnlineBattleScreen, PvpTeamScreen,
-    CloudScreen, CloudLoadScreen, LeaderboardScreen, TradeScreen, ReplayListScreen, ReplayScreen, KontoScreen,
+    CloudScreen, CloudLoadScreen, LeaderboardScreen, TradeScreen, ReplayListScreen, ReplayScreen, KontoScreen, LoginSyncScreen,
   };
 })();
