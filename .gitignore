@@ -1,3 +1,4 @@
 .DS_Store
 assets/_compose.html
 server/node_modules/
+server/data/

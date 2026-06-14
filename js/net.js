@@ -131,9 +131,40 @@ const Net = (() => {
   const hasWS = typeof WebSocket !== 'undefined';
   function makeTransport() { return hasWS ? WebSocketTransport() : MockTransport(); }
 
+  // --------------------------------------------------- Cloud-Sync (HTTP) ---
+  // Anonymer 6-Zeichen-Sync-Code (geräteunabhängig); Spielstand-JSON wird
+  // darunter in der Server-DB abgelegt. Zweites Gerät: gleichen Code -> Stand.
+  function syncCode() {
+    let c = localStorage.getItem('pkmn_synccode');
+    if (!c || !/^[A-Z2-9]{6}$/.test(c)) {
+      c = ''; for (let i = 0; i < 6; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+      localStorage.setItem('pkmn_synccode', c);
+    }
+    return c;
+  }
+  function apiBase() {
+    const h = location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || h === '') return 'http://' + (h || 'localhost') + ':4250';
+    return '';                      // same-origin via nginx /api
+  }
+  async function uploadSave(code, saveStr) {
+    const r = await fetch(apiBase() + '/api/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, save: saveStr }) });
+    if (!r.ok) throw ((await r.json().catch(() => ({}))).error || 'http');
+    return r.json();                // { ok, updated_at }
+  }
+  async function downloadSave(code) {
+    const r = await fetch(apiBase() + '/api/save?code=' + encodeURIComponent(code));
+    if (r.status === 404) throw 'not-found';
+    if (!r.ok) throw 'http';
+    return r.json();                // { save, updated_at }
+  }
+  const syncEnabled = () => localStorage.getItem('pkmn_syncon') === '1';
+  const setSyncEnabled = on => localStorage.setItem('pkmn_syncon', on ? '1' : '0');
+
   return {
     available: hasWS,              // echter Server-Transport verfügbar
     trainerId, randomCode, makeTransport, CODE_CHARS, CLIENT_VER,
     pvpTeam: null,                 // optionales PvP-Team [{id,level}] (PvpTeamScreen)
+    syncCode, uploadSave, downloadSave, syncEnabled, setSyncEnabled,
   };
 })();

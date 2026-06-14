@@ -10,12 +10,16 @@
  * P2: Legendären-Klausel (Schnellkampf), Zug-Timer im Request, Reconnect
  * (Grace-Period + Resume per Token). Protokoll: MULTIPLAYER_PLAN.md §4.
  */
+const http = require('http');
+const path = require('path');
 const { WebSocketServer } = require('ws');
 
 let BC; try { BC = require('./battle-core.js'); } catch (e) { BC = require('../js/battle-core.js'); }
 const SPECIES = require('./species.json');
+const createSync = require('./sync.js');
 
 const PORT = parseInt(process.env.PORT || '4250', 10);
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const LEVEL_CAP = 50;
 const MAX_TEAM = 6;
 const TURN_TIMEOUT = 30000;    // ms pro Zug
@@ -253,8 +257,15 @@ function joinRoom(ws, code) {
 }
 
 // --------------------------------------------------------------- Server ---
-const wss = new WebSocketServer({ port: PORT, host: '127.0.0.1' });
-wss.on('listening', () => console.log(`pkmn-battle-server lauscht auf 127.0.0.1:${PORT}`));
+// Ein HTTP-Server für /api/* (Cloud-Sync) + WebSocket-Upgrade. Nur Loopback —
+// Erreichbarkeit ausschliesslich über den nginx-Proxy.
+const handleSync = createSync(DATA_DIR);
+const httpServer = http.createServer((req, res) => {
+  if (handleSync(req, res)) return;        // /api/* erledigt
+  res.writeHead(426, { 'Content-Type': 'text/plain' }); res.end('Upgrade Required');
+});
+const wss = new WebSocketServer({ server: httpServer });
+httpServer.listen(PORT, '127.0.0.1', () => console.log(`pkmn-battle-server lauscht auf 127.0.0.1:${PORT} (ws + /api)`));
 
 wss.on('connection', (ws) => {
   ws.c = { id: null, ver: null, status: 'idle', match: null, side: 0, roomCode: null };

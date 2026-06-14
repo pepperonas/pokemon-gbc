@@ -18,6 +18,14 @@ die Screens bleiben unverändert.
 > `server/server.js` (Matchmaking, Räume, Team-Validierung, Turn-Loop, erzwungene
 > Wechsel, Timeouts, Disconnect→Forfeit), `WebSocketTransport` + `OnlineBattleScreen`
 > im Client, nginx-`/ws`-Proxy + systemd-Service. Headless- UND Browser-E2E grün.
+>
+> **✅ Phase P2 erledigt** — PvP-Team-Auswahl (Party+Box), Legendären-Klausel
+> (Schnellkampf), Zug-Timer, Reconnect (Grace + Resume-Token).
+>
+> **✅ Accounts/Cloud-Sync (Fundament für P3)** — anonymer 6-Zeichen-Sync-Code,
+> SQLite-Backend (`server/sync.js`, `/api/save`), `CloudScreen` im Pausenmenü,
+> optionaler Auto-Sync. Kein PII; Google-Login bleibt spätere Aufwertung. Liefert
+> die persistente Identität, auf der P3 (Ranked/Rangliste) aufsetzt.
 
 ---
 

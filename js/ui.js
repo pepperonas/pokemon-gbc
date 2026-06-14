@@ -180,7 +180,7 @@ const UI = (() => {
   // ------------------------------------------------------- Pausenmenü ---
   class PauseMenuScreen {
     constructor() {
-      this.items = ['TEAM', 'BEUTEL', 'POKEDEX', 'BOX', 'ONLINE', 'SPEICHERN', 'ZURUECK'];
+      this.items = ['TEAM', 'BEUTEL', 'POKEDEX', 'BOX', 'ONLINE', 'CLOUD', 'SPEICHERN', 'ZURUECK'];
       this.index = 0; this.toast = 0;
     }
     update(dt) {
@@ -197,6 +197,7 @@ const UI = (() => {
           case 'POKEDEX':   Game.push(new DexScreen()); break;
           case 'BOX':       Game.push(new BoxScreen()); break;
           case 'ONLINE':    Game.push(new OnlineScreen()); break;
+          case 'CLOUD':     Game.push(new CloudScreen()); break;
           case 'SPEICHERN': Game.save(); this.toast = 1200; break;
           case 'ZURUECK':   Game.pop(); break;
         }
@@ -206,13 +207,13 @@ const UI = (() => {
       const p = Game.player;
       box(ctx, 58, 2, 98, 116);
       this.items.forEach((it, i) => {
-        text(ctx, it, 78, 9 + i * 10);
-        if (i === this.index) text(ctx, '>', 68, 9 + i * 10);
+        text(ctx, it, 78, 8 + i * 9);
+        if (i === this.index) text(ctx, '>', 68, 8 + i * 9);
       });
       // Statuszeilen: Geld + Orden
-      ctx.fillStyle = INK; ctx.fillRect(66, 78, 82, 1);
-      text(ctx, `$${p.money || 0}`, 68, 86);
-      text(ctx, `ORDEN ${p.badges || 0}/2`, 68, 100);
+      ctx.fillStyle = INK; ctx.fillRect(66, 81, 82, 1);
+      text(ctx, `$${p.money || 0}`, 68, 87);
+      text(ctx, `ORDEN ${p.badges || 0}/2`, 68, 101);
       if (this.toast > 0) {
         box(ctx, 16, 120, 128, 24);
         text(ctx, 'Gespeichert!', 36, 128);
@@ -997,10 +998,101 @@ const UI = (() => {
     }
   }
 
+  // ----------------------------------------------------- Cloud-Sync UI ---
+  /** Spielstand in die Cloud hoch-/herunterladen (anonymer Sync-Code). */
+  class CloudScreen {
+    constructor() { this.items = ['HOCHLADEN', 'AUTO-SYNC', 'LADEN', 'ZURUECK']; this.index = 0; this.note = null; this.busy = false; }
+    flash(t) { this.note = { text: t, t: 1600 }; }
+    update(dt) {
+      if (this.note && (this.note.t -= dt) <= 0) this.note = null;
+      if (this.busy) return;
+      const n = this.items.length;
+      if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
+      if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
+      if (Input.take('b')) { Game.pop(); return; }
+      if (Input.take('a')) {
+        const c = this.items[this.index];
+        if (c === 'ZURUECK') { Game.pop(); return; }
+        Sound.confirm();
+        if (c === 'AUTO-SYNC') { Net.setSyncEnabled(!Net.syncEnabled()); this.flash('Auto-Sync ' + (Net.syncEnabled() ? 'AN' : 'AUS')); }
+        else if (c === 'HOCHLADEN') {
+          this.busy = true; this.flash('Lade hoch...');
+          Net.uploadSave(Net.syncCode(), Game.exportSave())
+            .then(() => { this.busy = false; this.flash('Hochgeladen unter ' + Net.syncCode() + '!'); })
+            .catch(() => { this.busy = false; this.flash('Server nicht erreichbar.'); });
+        } else if (c === 'LADEN') { Game.push(new CloudLoadScreen()); }
+      }
+    }
+    draw(ctx) {
+      ctx.fillStyle = CREAM; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'CLOUD-SYNC', 8, 8);
+      text(ctx, 'DEIN CODE:', 8, 26, '#585858');
+      text(ctx, Net.syncCode(), 92, 26, '#e03028');
+      this.items.forEach((it, i) => {
+        const y = 46 + i * 13;
+        if (i === this.index) text(ctx, '>', 8, y);
+        text(ctx, it === 'AUTO-SYNC' ? 'AUTO-SYNC: ' + (Net.syncEnabled() ? 'AN' : 'AUS') : it, 20, y);
+      });
+      text(ctx, 'Code notieren!', 8, 102, '#787878');
+      text(ctx, '2.Geraet: LADEN', 8, 111, '#787878');
+      if (this.note) { box(ctx, 4, 120, 152, 22); textWrapped(ctx, this.note.text, 10, 127, 18); }
+    }
+  }
+
+  /** 6-Zeichen-Code eingeben, Stand ziehen, nach Bestätigung übernehmen. */
+  class CloudLoadScreen {
+    constructor() { this.chars = Net.CODE_CHARS; this.slots = [0, 0, 0, 0, 0, 0]; this.pos = 0; this.phase = 'input'; this.note = null; this.data = null; this.confYes = true; }
+    flash(t) { this.note = { text: t, t: 1600 }; }
+    code() { return this.slots.map(i => this.chars[i]).join(''); }
+    update(dt) {
+      if (this.note && (this.note.t -= dt) <= 0) this.note = null;
+      if (this.phase === 'loading') return;
+      if (this.phase === 'confirm') {
+        if (Input.take('up') || Input.take('down')) { this.confYes = !this.confYes; Sound.cursor(); }
+        if (Input.take('a')) { Sound.confirm(); if (this.confYes) Game.loadSaveString(this.data.save); else this.phase = 'input'; }
+        if (Input.take('b')) this.phase = 'input';
+        return;
+      }
+      if (Input.take('b')) { Game.pop(); return; }
+      if (Input.take('left'))  { this.pos = (this.pos + 5) % 6; Sound.cursor(); }
+      if (Input.take('right')) { this.pos = (this.pos + 1) % 6; Sound.cursor(); }
+      const n = this.chars.length;
+      if (Input.take('up'))   { this.slots[this.pos] = (this.slots[this.pos] + 1) % n; Sound.cursor(); }
+      if (Input.take('down')) { this.slots[this.pos] = (this.slots[this.pos] + n - 1) % n; Sound.cursor(); }
+      if (Input.take('a')) {
+        Sound.confirm(); this.phase = 'loading'; this.flash('Lade...');
+        Net.downloadSave(this.code())
+          .then(d => { this.data = d; this.confYes = true; this.phase = 'confirm'; })
+          .catch(e => { this.phase = 'input'; this.flash(e === 'not-found' ? 'Kein Stand zu diesem Code.' : 'Server nicht erreichbar.'); });
+      }
+    }
+    draw(ctx) {
+      ctx.fillStyle = CREAM; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'STAND LADEN', 8, 10);
+      for (let i = 0; i < 6; i++) {
+        const x = 8 + i * 25; box(ctx, x, 40, 20, 22);
+        text(ctx, this.chars[this.slots[i]], x + 6, 47, i === this.pos ? '#e03028' : INK);
+        if (i === this.pos && this.phase === 'input') { text(ctx, '^', x + 6, 32); text(ctx, 'v', x + 6, 64); }
+      }
+      if (this.phase === 'confirm' && this.data) {
+        box(ctx, 8, 74, 144, 54);
+        const d = new Date(this.data.updated_at), p2 = x => String(x).padStart(2, '0');
+        text(ctx, 'Gefunden! Stand vom', 14, 80);
+        text(ctx, p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '. ' + p2(d.getHours()) + ':' + p2(d.getMinutes()), 14, 92);
+        text(ctx, 'Lokal ersetzen?', 14, 105);
+        text(ctx, this.confYes ? '>JA   NEIN' : ' JA  >NEIN', 14, 117);
+      } else {
+        text(ctx, 'A: Laden   B: Zurueck', 8, 110, '#787878');
+        if (this.note) { box(ctx, 4, 120, 152, 22); textWrapped(ctx, this.note.text, 10, 127, 18); }
+      }
+    }
+  }
+
   return {
     text, textWrapped, box, hpBar, drawSilhouette, drawMonDetail,
     LoadingScreen, TitleScreen, StarterScreen, PauseMenuScreen,
     TeamScreen, BoxScreen, DexScreen, ItemScreen, MartScreen,
     OnlineScreen, OnlineSearchScreen, OnlineCodeScreen, OnlineBattleScreen, PvpTeamScreen,
+    CloudScreen, CloudLoadScreen,
   };
 })();

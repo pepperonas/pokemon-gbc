@@ -95,6 +95,15 @@ const Game = {
     }));
   },
 
+  /** Aktuellen Spielstand als JSON-String (für Cloud-Upload). */
+  exportSave() { this.save(); return localStorage.getItem(SAVE_KEY); },
+
+  /** Heruntergeladenen Spielstand übernehmen und ins Spiel springen. */
+  loadSaveString(str) {
+    localStorage.setItem(SAVE_KEY, str);
+    this.continueGame();
+  },
+
   continueGame() {
     try {
       const s = JSON.parse(localStorage.getItem(SAVE_KEY));
@@ -139,6 +148,8 @@ const Game = {
     if (Game.player && now - lastAutoSave >= AUTOSAVE_MS) {
       lastAutoSave = now;
       Game.save();
+      // Optionaler stiller Cloud-Sync (wenn aktiviert)
+      if (Net.syncEnabled()) Net.uploadSave(Net.syncCode(), localStorage.getItem(SAVE_KEY)).catch(() => {});
     }
 
     Input.beginFrame();
