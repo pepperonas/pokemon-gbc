@@ -231,12 +231,62 @@ class Match {
   }
 }
 
+// ------------------------------------------------------------------ Trade ---
+// Live-Tausch zwischen zwei Spielern: jeder bietet EIN Pokémon an, beide
+// bestätigen, Server tauscht. Neues Angebot setzt Bestätigungen zurück.
+function validTradeMon(m) {
+  if (!m) return null;
+  const id = m.id | 0;
+  if (!SPECIES[id]) return null;
+  return { id, level: Math.max(1, Math.min(100, m.level | 0)), exp: Math.max(0, m.exp | 0), hp: Math.max(0, m.hp | 0), status: typeof m.status === 'string' ? m.status : null };
+}
+
+class Trade {
+  constructor(a, b) {
+    this.players = [a, b]; this.offers = [null, null]; this.confirmed = [false, false]; this.done = false;
+    for (let s = 0; s < 2; s++) { const ws = this.players[s]; ws.c.trade = this; ws.c.tside = s; ws.c.status = 'trade'; send(ws, { t: 'tmatched', you: s, oppId: this.players[1 - s].c.id }); }
+  }
+  other(s) { return this.players[1 - s]; }
+  offer(side, mon) {
+    if (this.done) return;
+    const v = validTradeMon(mon);
+    if (!v) { send(this.players[side], { t: 'error', code: 'bad-mon' }); return; }
+    this.offers[side] = v; this.confirmed = [false, false];
+    this.players.forEach(p => send(p, { t: 'toffer', side, mon: v }));
+  }
+  confirm(side) {
+    if (this.done || !this.offers[0] || !this.offers[1]) return;
+    this.confirmed[side] = true;
+    send(this.other(side), { t: 'tconfirmed', side });
+    if (this.confirmed[0] && this.confirmed[1]) {
+      this.done = true;
+      send(this.players[0], { t: 'tdone', received: this.offers[1] });
+      send(this.players[1], { t: 'tdone', received: this.offers[0] });
+      this.cleanup();
+    }
+  }
+  cancel(side) { if (this.done) return; this.done = true; send(this.other(side), { t: 'tcancelled' }); this.cleanup(); }
+  onLeave(side) { this.cancel(side); }
+  cleanup() { this.players.forEach(p => { if (p.c) { p.c.trade = null; p.c.status = 'idle'; } }); }
+}
+
 // ------------------------------------------------------------ Matchmaking ---
 const queue = [];
 const rooms = new Map();
+const tradeQueue = [];
+
+function tryQuickTrade(ws) {
+  const qi = tradeQueue.indexOf(ws); if (qi >= 0) tradeQueue.splice(qi, 1);
+  while (tradeQueue.length) {
+    const other = tradeQueue.shift();
+    if (other.readyState === 1 && other !== ws) { new Trade(other, ws); return; }
+  }
+  tradeQueue.push(ws); ws.c.status = 'tqueue';
+}
 
 function leaveLobby(ws) {
   const qi = queue.indexOf(ws); if (qi >= 0) queue.splice(qi, 1);
+  const ti = tradeQueue.indexOf(ws); if (ti >= 0) tradeQueue.splice(ti, 1);
   if (ws.c.roomCode && rooms.get(ws.c.roomCode) === ws) rooms.delete(ws.c.roomCode);
   ws.c.roomCode = null;
 }
@@ -278,7 +328,7 @@ const wss = new WebSocketServer({ server: httpServer });
 httpServer.listen(PORT, '127.0.0.1', () => console.log(`pkmn-battle-server lauscht auf 127.0.0.1:${PORT} (ws + /api)`));
 
 wss.on('connection', (ws) => {
-  ws.c = { id: null, ver: null, status: 'idle', match: null, side: 0, roomCode: null };
+  ws.c = { id: null, ver: null, name: null, status: 'idle', match: null, side: 0, roomCode: null, trade: null, tside: 0 };
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
@@ -292,6 +342,10 @@ wss.on('connection', (ws) => {
       case 'create': if (!m) createRoom(ws, msg); break;
       case 'join':   if (!m) joinRoom(ws, msg.code); break;
       case 'cancel': leaveLobby(ws); ws.c.status = 'idle'; break;
+      case 'tqueue':  if (!ws.c.match && !ws.c.trade) tryQuickTrade(ws); break;
+      case 'toffer':  if (ws.c.trade) ws.c.trade.offer(ws.c.tside, msg.mon); break;
+      case 'tconfirm':if (ws.c.trade) ws.c.trade.confirm(ws.c.tside); break;
+      case 'tcancel': if (ws.c.trade) ws.c.trade.cancel(ws.c.tside); else { leaveLobby(ws); ws.c.status = 'idle'; } break;
       case 'resume': {
         const e = activeMatches.get(String(msg.token || ''));
         if (e && !m) e.match.resume(ws, e.side); else send(ws, { t: 'error', code: 'no-match' });
@@ -308,6 +362,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     leaveLobby(ws);
     if (ws.c.match) ws.c.match.onLeave(ws.c.side);
+    if (ws.c.trade) ws.c.trade.onLeave(ws.c.tside);
   });
   ws.on('error', () => {});
 });

@@ -553,7 +553,7 @@ const UI = (() => {
   /** Einstiegs-Lobby: Schnellkampf / Raum erstellen / Code eingeben. */
   class OnlineScreen {
     constructor() {
-      this.items = ['SCHNELLKAMPF', 'RAUM OEFFNEN', 'CODE EINGEBEN', 'MEIN TEAM', 'RANGLISTE', 'ZURUECK'];
+      this.items = ['SCHNELLKAMPF', 'RAUM OEFFNEN', 'CODE EINGEBEN', 'MEIN TEAM', 'RANGLISTE', 'TAUSCH', 'ZURUECK'];
       this.index = 0; this.t = 0; this.myRank = null;
       this.transport = Net.makeTransport();
       this.status = 'connecting';
@@ -586,6 +586,7 @@ const UI = (() => {
           case 'CODE EINGEBEN':  Game.push(new OnlineCodeScreen(this.transport)); break;
           case 'MEIN TEAM':      Game.push(new PvpTeamScreen()); break;
           case 'RANGLISTE':      Game.push(new LeaderboardScreen()); break;
+          case 'TAUSCH':         Game.push(new OnlineSearchScreen(this.transport, 'trade')); break;
         }
       }
     }
@@ -593,24 +594,24 @@ const UI = (() => {
     draw(ctx) {
       ctx.fillStyle = '#283050'; ctx.fillRect(0, 0, 160, 144);
       // Kopf
-      ctx.fillStyle = '#e03028'; ctx.fillRect(16, 8, 128, 22);
-      ctx.strokeStyle = '#f8d030'; ctx.lineWidth = 2; ctx.strokeRect(17, 9, 126, 20);
-      text(ctx, 'ONLINE-KAMPF', 32, 14, '#f8d030');
-      // Status-Anzeige
+      ctx.fillStyle = '#e03028'; ctx.fillRect(20, 4, 120, 20);
+      ctx.strokeStyle = '#f8d030'; ctx.lineWidth = 2; ctx.strokeRect(21, 5, 118, 18);
+      text(ctx, 'ONLINE', 56, 9, '#f8d030');
+      // Status / ID / ELO
       const stCol = this.status === 'online' ? '#30b850' : this.status === 'offline' ? '#e03028' : '#f8b800';
-      ctx.fillStyle = stCol; ctx.fillRect(20, 38, 6, 6);
+      ctx.fillStyle = stCol; ctx.fillRect(10, 30, 6, 6);
       const stTxt = this.status === 'online' ? 'VERBUNDEN' : this.status === 'offline' ? 'OFFLINE' : 'VERBINDE' + dots(this.t);
-      text(ctx, stTxt, 32, 37, '#a8b8d8');
-      text(ctx, 'ID: ' + Net.trainerId(), 32, 47, '#a8b8d8');
-      text(ctx, this.myRank ? ('ELO ' + this.myRank.elo + '  #' + this.myRank.rank) : 'ELO: noch unranked', 32, 57, '#f8d030');
-      // Menü
-      box(ctx, 14, 64, 132, 62);
+      text(ctx, stTxt, 20, 29, '#a8b8d8');
+      text(ctx, 'ID ' + Net.trainerId(), 84, 29, '#a8b8d8');
+      text(ctx, this.myRank ? ('ELO ' + this.myRank.elo + '  #' + this.myRank.rank + '/' + this.myRank.total) : 'ELO: noch unranked', 20, 40, '#f8d030');
+      // Menü (7 Einträge)
+      box(ctx, 12, 48, 136, 90);
       this.items.forEach((it, i) => {
-        const y = 69 + i * 10;
+        const y = 55 + i * 11;
         text(ctx, it, 34, y);
-        if (i === this.index) text(ctx, '>', 24, y);
+        if (i === this.index) text(ctx, '>', 22, y);
       });
-      text(ctx, this.busy ? 'Erstelle Raum' + dots(this.t) : 'Schnellk.: Rangliste + fair', 18, 132, '#68789a');
+      if (this.busy) text(ctx, 'Erstelle Raum' + dots(this.t), 90, 55, '#68789a');
     }
   }
 
@@ -640,6 +641,7 @@ const UI = (() => {
       };
       if (mode === 'quick')      transport.quickMatch(onTick).then(done).catch(fail);
       else if (mode === 'host')  transport.waitForJoin(code, onTick).then(done).catch(fail);
+      else if (mode === 'trade') transport.tradeQuick().then(r => this.onMatchedTrade(r)).catch(fail);
       else                       transport.joinRoom(code, onTick).then(done).catch(fail);
     }
     onMatched(matched) {
@@ -648,6 +650,13 @@ const UI = (() => {
       Sound.confirm();
       Game.pop();                                       // Such-Screen schließen
       Game.push(new OnlineBattleScreen(this.tp, matched));
+    }
+    onMatchedTrade(m) {
+      if (this._matched) return;
+      this._matched = true;
+      Sound.confirm();
+      Game.pop();
+      Game.push(new TradeScreen(this.tp, m));
     }
     update(dt) {
       this.t += dt;
@@ -667,7 +676,7 @@ const UI = (() => {
         return;
       }
       spinBall(ctx, 80, 44, 13, this.t);
-      const head = this.mode === 'host' ? 'WARTE AUF GEGNER' : 'SUCHE GEGNER';
+      const head = this.mode === 'host' ? 'WARTE AUF GEGNER' : this.mode === 'trade' ? 'SUCHE TAUSCH' : 'SUCHE GEGNER';
       text(ctx, head + dots(this.t), 28, 72, '#f8f8f8');
       if (this.code) {
         box(ctx, 40, 86, 80, 24);
@@ -1116,11 +1125,120 @@ const UI = (() => {
     }
   }
 
+  /** Live-Tausch: ein Pokémon anbieten, beide bestätigen, Server tauscht. */
+  const TRADE_EVO = { 64: 65, 67: 68, 75: 76, 93: 94 };   // Kadabra/Maschock/Georok/Alpollo
+  class TradeScreen {
+    constructor(transport, matched) {
+      this.tp = transport; this.me = matched.you;
+      this.all = Game.player.party.concat(Game.player.box);
+      this.index = 0; this.scroll = 0;
+      this.phase = 'pick';                 // 'pick' | 'review' | 'done' | 'cancelled'
+      this.myOffer = null; this.myOfferRef = null; this.oppOffer = null;
+      this.myConfirmed = false; this.oppConfirmed = false;
+      this.received = null; this.note = null; this.t = 0;
+      this.msg = 'Waehle dein Angebot.';
+      this.off = transport.on(m => this.onMsg(m));
+    }
+    onMsg(m) {
+      if (m.t === 'toffer') {
+        if (m.side === this.me) this.myOffer = m.mon;
+        else { this.oppOffer = m.mon; Data.sprite(Data.byId(m.mon.id).front); }
+        this.myConfirmed = false; this.oppConfirmed = false;
+        if (this.myOffer && this.oppOffer) this.msg = 'Tauschen? A: BESTAETIGEN';
+      } else if (m.t === 'tconfirmed') { if (m.side !== this.me) this.oppConfirmed = true; }
+      else if (m.t === 'tdone') this.applyTrade(m.received);
+      else if (m.t === 'tcancelled') { this.phase = 'cancelled'; this.msg = 'Tausch abgebrochen.'; }
+      else if (m.t === 'error' && m.code === 'bad-mon') this.note = { text: 'Ungueltiges Pokemon.', t: 1200 };
+      else if (m.t === '_closed') { if (this.phase !== 'done') { this.phase = 'cancelled'; this.msg = 'Verbindung verloren.'; } }
+    }
+    applyTrade(received) {
+      this.phase = 'done';
+      const p = Game.player;
+      let i = p.party.indexOf(this.myOfferRef);
+      if (i >= 0) p.party.splice(i, 1); else { i = p.box.indexOf(this.myOfferRef); if (i >= 0) p.box.splice(i, 1); }
+      const mon = Battle.restoreMon(received);
+      let evoMsg = '';
+      if (TRADE_EVO[mon.id]) {
+        const old = Data.byId(mon.id).name;
+        mon.id = TRADE_EVO[mon.id];
+        mon.stats = Battle.calcStats(mon.species.base, mon.level);
+        mon.moves = Data.movesFor(mon.species, mon.level);
+        mon.hp = Math.min(mon.hp, mon.stats.hp);
+        evoMsg = ' ' + old + ' entwickelt sich zu ' + mon.name + '!';
+      }
+      if (p.party.length < 6) p.party.push(mon); else p.box.push(mon);
+      p.seen.add(mon.id); p.caught.add(mon.id);
+      Game.save();
+      if (Net.syncEnabled()) Net.uploadSave(Net.syncCode(), Game.exportSave()).catch(() => {});
+      Sound.levelup && Sound.levelup();
+      this.received = mon;
+      this.msg = 'Du erhaeltst ' + mon.name.toUpperCase() + '!' + evoMsg;
+    }
+    update(dt) {
+      this.t += dt;
+      if (this.note && (this.note.t -= dt) <= 0) this.note = null;
+      if (this.phase === 'done' || this.phase === 'cancelled') {
+        if (Input.take('a') || Input.take('b')) { if (this.off) this.off(); Game.pop(); }
+        return;
+      }
+      const leave = () => { this.tp.send({ t: 'tcancel' }); if (this.off) this.off(); Game.pop(); };
+      if (this.phase === 'pick') {
+        const n = this.all.length;
+        if (!n) { this.msg = 'Keine Pokemon zum Tauschen!'; if (Input.take('b')) leave(); return; }
+        if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
+        if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
+        this.scroll = Math.max(0, Math.min(this.index - 3, n - 4));
+        if (Input.take('b')) { leave(); return; }
+        if (Input.take('a')) {
+          const mon = this.all[this.index]; this.myOfferRef = mon;
+          this.tp.send({ t: 'toffer', mon: { id: mon.id, level: mon.level, exp: mon.exp, hp: mon.hp, status: mon.status || null } });
+          Sound.confirm(); this.phase = 'review'; this.msg = 'Angebot gesendet. Warte...';
+        }
+        return;
+      }
+      // review
+      if (Input.take('b')) { leave(); return; }
+      if (Input.take('a') && this.myOffer && this.oppOffer && !this.myConfirmed) {
+        this.myConfirmed = true; this.tp.send({ t: 'tconfirm' }); Sound.confirm(); this.msg = 'Bestaetigt. Warte auf Partner...';
+      }
+    }
+    panel(ctx, x, label, offer, confirmed) {
+      box(ctx, x, 16, 72, 76);
+      text(ctx, label, x + 6, 20, '#585858');
+      if (offer) {
+        const sp = Data.byId(offer.id), img = Data.sprite(sp.front);
+        if (img) ctx.drawImage(img, x + 12, 30, 48, 48); else Data.drawPlaceholder(ctx, sp, x + 12, 30, 48);
+        text(ctx, sp.name.toUpperCase().slice(0, 9), x + 4, 80, INK);
+        text(ctx, 'L' + offer.level, x + 4, 88, '#585858');
+        if (confirmed) text(ctx, 'OK', x + 54, 20, '#30b850');
+      } else { text(ctx, '...', x + 30, 50, '#a0a0a0'); }
+    }
+    draw(ctx) {
+      ctx.fillStyle = CREAM; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'TAUSCH', 6, 6);
+      this.panel(ctx, 4, 'DU BIETEST', this.myOffer, this.myConfirmed);
+      this.panel(ctx, 84, 'PARTNER', this.oppOffer, this.oppConfirmed);
+      box(ctx, 0, 96, 160, 48);
+      if (this.phase === 'pick' && this.all.length) {
+        this.all.slice(this.scroll, this.scroll + 4).forEach((m, i) => {
+          const gi = this.scroll + i, y = 102 + i * 10;
+          if (gi === this.index) text(ctx, '>', 6, y);
+          text(ctx, Data.byId(m.id).name.toUpperCase(), 16, y);
+          text(ctx, 'L' + m.level, 124, y);
+        });
+      } else {
+        textWrapped(ctx, this.msg, 6, 104, 18);
+        if (this.phase === 'done' || this.phase === 'cancelled') text(ctx, 'A: OK', 132, 134, '#787878');
+      }
+      if (this.note) { box(ctx, 4, 116, 152, 24); textWrapped(ctx, this.note.text, 10, 124, 18); }
+    }
+  }
+
   return {
     text, textWrapped, box, hpBar, drawSilhouette, drawMonDetail,
     LoadingScreen, TitleScreen, StarterScreen, PauseMenuScreen,
     TeamScreen, BoxScreen, DexScreen, ItemScreen, MartScreen,
     OnlineScreen, OnlineSearchScreen, OnlineCodeScreen, OnlineBattleScreen, PvpTeamScreen,
-    CloudScreen, CloudLoadScreen, LeaderboardScreen,
+    CloudScreen, CloudLoadScreen, LeaderboardScreen, TradeScreen,
   };
 })();

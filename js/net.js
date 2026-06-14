@@ -93,6 +93,12 @@ const Net = (() => {
       connect() { return new Promise((res, rej) => openSocket(() => {}, res, rej)); },
       resume(tok) { return new Promise((res, rej) => openSocket(() => sendRaw({ t: 'resume', token: tok }), res, rej)); },
       quickMatch() { sendRaw({ t: 'queue' }); return awaitMatched(); },
+      tradeQuick() {
+        sendRaw({ t: 'tqueue' });
+        return new Promise((res, rej) => {
+          const off = on(m => { if (m.t === 'tmatched') { off(); res({ you: m.you, oppId: m.oppId }); } else if (m.t === '_closed') { off(); rej('closed'); } });
+        });
+      },
       createRoom() {
         return new Promise((res, rej) => {
           const off = on(m => { if (m.t === 'room') { off(); res({ code: m.code }); } else if (m.t === '_closed') { off(); rej('closed'); } });
