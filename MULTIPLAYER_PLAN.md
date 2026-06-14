@@ -214,7 +214,7 @@ Hobby-Last locker auf dem bestehenden VPS; bei Bedarf später Cluster + sticky.
 |-------|--------|----------|
 | **P0 ✅** | `battle-core.js` aus `battle.js` extrahiert, seedbarer RNG, Solo nutzt es weiter | Engine isomorph & testbar, Solo unverändert |
 | **P1 ✅** | `resolveTurn` (event-basiert), `server/server.js` (queue/create/join), `WebSocketTransport` + `OnlineBattleScreen`, Team-Validierung, Timeouts, Disconnect→Forfeit | **Echter PvP-Kampf live** auf wss://pokemon.celox.io/ws |
-| **P2** | Reconnect-Token, Klausel-Sets (Legendären-Sperre), Raum-Optionen | Stabiler, konfigurierbarer |
+| **P2 ✅** | PvP-Team-Auswahl (Party+Box), Legendären-Klausel (Schnellkampf), Zug-Timer, Reconnect (Grace + Resume-Token) | Stabiler & fairer, Disconnect ≠ sofort verloren |
 | **P3** | Wertung (ELO), Sieg-/Niederlage-Statistik, optional Rangliste, Spectate | Kompetitives Online-Meta |
 
 P0 ist reine Client-Refaktorierung (kein Risiko, sofort startbar). Ab P1 läuft

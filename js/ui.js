@@ -552,7 +552,7 @@ const UI = (() => {
   /** Einstiegs-Lobby: Schnellkampf / Raum erstellen / Code eingeben. */
   class OnlineScreen {
     constructor() {
-      this.items = ['SCHNELLKAMPF', 'RAUM OEFFNEN', 'CODE EINGEBEN', 'ZURUECK'];
+      this.items = ['SCHNELLKAMPF', 'RAUM OEFFNEN', 'CODE EINGEBEN', 'MEIN TEAM', 'ZURUECK'];
       this.index = 0; this.t = 0;
       this.transport = Net.makeTransport();
       this.status = 'connecting';
@@ -581,6 +581,7 @@ const UI = (() => {
             }).catch(() => { this.busy = false; });
             break;
           case 'CODE EINGEBEN':  Game.push(new OnlineCodeScreen(this.transport)); break;
+          case 'MEIN TEAM':      Game.push(new PvpTeamScreen()); break;
         }
       }
     }
@@ -598,14 +599,14 @@ const UI = (() => {
       text(ctx, stTxt, 32, 38, '#a8b8d8');
       text(ctx, 'ID: ' + Net.trainerId(), 32, 50, '#a8b8d8');
       // Menü
-      box(ctx, 16, 64, 128, 60);
+      box(ctx, 16, 62, 128, 64);
       this.items.forEach((it, i) => {
-        const y = 72 + i * 12;
+        const y = 70 + i * 11;
         text(ctx, it, 36, y);
         if (i === this.index) text(ctx, '>', 26, y);
       });
-      if (this.busy) text(ctx, 'Erstelle Raum' + dots(this.t), 24, 128, '#68789a');
-      else text(ctx, 'B: Zurueck', 24, 130, '#68789a');
+      if (this.busy) text(ctx, 'Erstelle Raum' + dots(this.t), 24, 132, '#68789a');
+      else text(ctx, 'Schnellk.: ohne Legendaere', 18, 132, '#68789a');
     }
   }
 
@@ -718,10 +719,62 @@ const UI = (() => {
    * Der Client trifft nur Entscheidungen (Attacke/Wechsel) — gerechnet wird
    * ausschliesslich serverseitig (battle-core.js). Siehe MULTIPLAYER_PLAN.md.
    */
+  /** PvP-Team zusammenstellen: bis zu 6 aus Party + Box (-> Net.pvpTeam). */
+  class PvpTeamScreen {
+    constructor() {
+      this.all = Game.player.party.concat(Game.player.box);
+      this.chosen = [];                       // Indizes in Auswahl-Reihenfolge
+      const cur = Net.pvpTeam, used = new Set();
+      if (cur && cur.length) {
+        for (const e of cur) {
+          const i = this.all.findIndex((m, idx) => !used.has(idx) && m.id === e.id && m.level === e.level);
+          if (i >= 0 && this.chosen.length < 6) { this.chosen.push(i); used.add(i); }
+        }
+      }
+      if (!this.chosen.length) for (let i = 0; i < Game.player.party.length && this.chosen.length < 6; i++) this.chosen.push(i);
+      this.index = 0; this.scroll = 0; this.note = null;
+    }
+    flash(t) { this.note = { text: t, t: 1000 }; }
+    update(dt) {
+      if (this.note && (this.note.t -= dt) <= 0) this.note = null;
+      const n = this.all.length;
+      if (!n) { if (Input.take('a') || Input.take('b')) Game.pop(); return; }
+      if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
+      if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
+      this.scroll = Math.max(0, Math.min(this.index - 4, n - 8));
+      if (Input.take('a')) {
+        const pos = this.chosen.indexOf(this.index);
+        if (pos >= 0) { this.chosen.splice(pos, 1); Sound.cursor(); }
+        else if (this.chosen.length < 6) { this.chosen.push(this.index); Sound.confirm(); }
+        else this.flash('Maximal 6 POKEMON!');
+      }
+      if (Input.take('b')) {
+        Net.pvpTeam = this.chosen.length ? this.chosen.map(i => ({ id: this.all[i].id, level: this.all[i].level })) : null;
+        Game.pop();
+      }
+    }
+    draw(ctx) {
+      ctx.fillStyle = CREAM; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'PvP-TEAM ' + this.chosen.length + '/6', 6, 6);
+      if (!this.all.length) { text(ctx, 'Kein POKEMON!', 12, 64); return; }
+      this.all.slice(this.scroll, this.scroll + 8).forEach((m, i) => {
+        const gi = this.scroll + i, y = 20 + i * 13;
+        if (gi === this.index) text(ctx, '>', 2, y);
+        const pos = this.chosen.indexOf(gi);
+        text(ctx, pos >= 0 ? String(pos + 1) : '-', 10, y, pos >= 0 ? '#e03028' : '#a0a0a0');
+        text(ctx, Data.byId(m.id).name.toUpperCase(), 22, y);
+        text(ctx, 'L' + m.level, 130, y);
+      });
+      if (this.note) { box(ctx, 4, 116, 152, 26); textWrapped(ctx, this.note.text, 10, 124, 18); }
+      else text(ctx, 'A: waehlen   B: fertig', 8, 132, '#787878');
+    }
+  }
+
   const STATUS_WORD = { psn: 'wurde vergiftet!', brn: 'erleidet Verbrennungen!', par: 'ist paralysiert!', frz: 'erstarrt zu Eis!' };
   class OnlineBattleScreen {
     constructor(transport, matched) {
       this.tp = transport; this.me = matched.you;
+      this.token = matched.token; this.clause = matched.clause || {};
       this.self = null; this.opp = null;          // [{id,level,maxHp,hp,status,moves?}]
       this.aSelf = 0; this.aOpp = 0;
       this.dispSelfHp = 0; this.dispOppHp = 0;
@@ -730,20 +783,39 @@ const UI = (() => {
       this.endInfo = null; this.ended = null;
       this.waiting = false; this.msg = 'Synchronisiere...';
       this.flashSelf = 0; this.flashOpp = 0; this.time = 0;
+      this.reconnecting = false; this.resumeTries = 0; this.oppGone = false; this.turnEndsAt = 0;
       this.off = transport.on(m => this.onMsg(m));
-      transport.send({ t: 'team', mons: Game.player.party.map(m => ({ id: m.id, level: m.level })) });
+      const team = (Net.pvpTeam && Net.pvpTeam.length) ? Net.pvpTeam : Game.player.party.map(m => ({ id: m.id, level: m.level }));
+      transport.send({ t: 'team', mons: team });
     }
 
     onMsg(m) {
-      if (m.t === 'start') {
-        this.self = m.self; this.opp = m.opp; this.aSelf = 0; this.aOpp = 0;
-        this.dispSelfHp = this.self[0].hp; this.dispOppHp = this.opp[0].hp;
-        this.msg = 'Der Kampf beginnt!';
-        Data.sprite(Data.byId(this.self[0].id).back); Data.sprite(Data.byId(this.opp[0].id).front);
+      if (m.t === 'start' || m.t === 'resync') {
+        this.self = m.self; this.opp = m.opp;
+        this.aSelf = m.aSelf || 0; this.aOpp = m.aOpp || 0;
+        this.dispSelfHp = this.self[this.aSelf].hp; this.dispOppHp = this.opp[this.aOpp].hp;
+        this.queue = []; this.cur = null; this.menu = null; this.request = null;
+        this.reconnecting = false; this.waiting = false;
+        this.msg = m.t === 'resync' ? 'Wieder verbunden!' : 'Der Kampf beginnt!';
+        Data.sprite(Data.byId(this.self[this.aSelf].id).back); Data.sprite(Data.byId(this.opp[this.aOpp].id).front);
       } else if (m.t === 'turn') { this.waiting = false; for (const e of m.events) this.queue.push(e); }
       else if (m.t === 'request') { this.request = m; }
       else if (m.t === 'end') { this.endInfo = m; }
-      else if (m.t === '_closed') { if (!this.endInfo && !this.ended) this.endInfo = { result: 'lose', reason: 'closed' }; }
+      else if (m.t === 'oppgone') { this.oppGone = true; }
+      else if (m.t === 'oppback') { this.oppGone = false; }
+      else if (m.t === 'cancelled') { this.endInfo = { result: 'cancelled', reason: m.reason }; }
+      else if (m.t === 'error') { this.endInfo = m.code === 'no-match' ? { result: 'lose', reason: 'closed' } : { result: 'cancelled', reason: m.code }; }
+      else if (m.t === '_closed') { this.handleClose(); }
+    }
+
+    handleClose() {
+      if (this.ended || this.endInfo) return;
+      if (!this.token || this.reconnecting || this.resumeTries >= 3) {
+        this.endInfo = { result: 'lose', reason: 'closed' }; return;
+      }
+      this.reconnecting = true; this.resumeTries++; this.menu = null;
+      this.msg = 'Verbindung verloren - neu verbinden...';
+      this.tp.resume(this.token).catch(() => { this.reconnecting = false; this.handleClose(); });
     }
 
     nameOf(side, idx) { const arr = side === this.me ? this.self : this.opp; return Data.byId(arr[idx].id).name.toUpperCase(); }
@@ -788,10 +860,11 @@ const UI = (() => {
       return ev;
     }
 
-    openMain() { this.menu = { mode: 'main', index: 0 }; this.msg = 'Was soll ' + this.nameOf(this.me, this.aSelf) + ' tun?'; }
+    armTimer() { this.turnEndsAt = this.time + ((this.request && this.request.deadline) || 30000); }
+    openMain() { this.armTimer(); this.menu = { mode: 'main', index: 0 }; this.msg = 'Was soll ' + this.nameOf(this.me, this.aSelf) + ' tun?'; }
     openMove() { this.menu = { mode: 'move', index: 0, items: this.self[this.aSelf].moves.map(m => m.name.toUpperCase()) }; }
     openSwitch() { this.menu = { mode: 'switch', index: this.aSelf }; }
-    openForce() { this.menu = { mode: 'force', index: this.request.options.switchTo[0] }; this.msg = this.nameOf(this.me, this.aSelf) + ' wurde besiegt! Naechstes POKEMON?'; }
+    openForce() { this.armTimer(); this.menu = { mode: 'force', index: this.request.options.switchTo[0] }; this.msg = this.nameOf(this.me, this.aSelf) + ' wurde besiegt! Naechstes POKEMON?'; }
 
     sendAction(kind, data) {
       this.tp.send({ t: 'action', turn: this.request.turn, kind, data });
@@ -839,13 +912,20 @@ const UI = (() => {
       if (this.queue.length) { this.cur = this.beginEvent(this.queue.shift()); return; }
       if (this.endInfo) {
         this.ended = this.endInfo;
-        this.msg = this.endInfo.result === 'win'
-          ? (this.endInfo.reason === 'disconnect' ? 'Gegner getrennt - du GEWINNST!' : 'Du hast GEWONNEN!')
-          : (this.endInfo.reason && this.endInfo.reason !== 'ko' ? 'Verbindung verloren...' : 'Du hast VERLOREN...');
-        Sound.badge && this.endInfo.result === 'win' && Sound.badge();
+        const r = this.endInfo;
+        this.msg = r.result === 'win'
+          ? (r.reason === 'disconnect' ? 'Gegner getrennt - du GEWINNST!' : 'Du hast GEWONNEN!')
+          : r.result === 'cancelled'
+            ? (r.reason === 'no-legendary' ? 'Legendaere sind im Schnellkampf nicht erlaubt!'
+              : r.reason === 'bad-team' ? 'Ungueltiges Team!'
+              : r.reason === 'opp-team' ? 'Gegner hatte ein ungueltiges Team.' : 'Match abgebrochen.')
+            : (r.reason && r.reason !== 'ko' ? 'Verbindung verloren...' : 'Du hast VERLOREN...');
+        Sound.badge && r.result === 'win' && Sound.badge();
         return;
       }
+      if (this.reconnecting) return;                       // wartet auf resync
       if (this.request) { this.request.kind === 'forceswitch' ? this.openForce() : this.openMain(); return; }
+      if (this.oppGone) { this.msg = 'Gegner getrennt - warte auf Reconnect...'; return; }
       if (this.waiting) this.msg = 'Warte auf Gegner...';
     }
 
@@ -892,6 +972,10 @@ const UI = (() => {
       text(ctx, 'ONLINE', 100, 48, '#3878c8');
       // Textbox / Menü
       box(ctx, 0, 96, 160, 48);
+      if (this.menu && !this.ended) {                       // Zug-Timer
+        const rem = Math.max(0, Math.ceil((this.turnEndsAt - this.time) / 1000));
+        text(ctx, rem + 's', 4, 98, rem <= 5 ? '#e03028' : '#a0a0a0');
+      }
       if (this.menu && this.menu.mode === 'main') {
         box(ctx, 64, 96, 96, 48);
         ['KAMPF', 'PKMN'].forEach((it, i) => { const y = 108 + i * 12; text(ctx, it, 86, y); if (i === this.menu.index) text(ctx, '>', 76, y); });
@@ -917,6 +1001,6 @@ const UI = (() => {
     text, textWrapped, box, hpBar, drawSilhouette, drawMonDetail,
     LoadingScreen, TitleScreen, StarterScreen, PauseMenuScreen,
     TeamScreen, BoxScreen, DexScreen, ItemScreen, MartScreen,
-    OnlineScreen, OnlineSearchScreen, OnlineCodeScreen, OnlineBattleScreen,
+    OnlineScreen, OnlineSearchScreen, OnlineCodeScreen, OnlineBattleScreen, PvpTeamScreen,
   };
 })();

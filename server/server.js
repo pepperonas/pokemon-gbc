@@ -7,38 +7,42 @@
  * berechnet Stats/Schaden/RNG mit der GETEILTEN Engine (battle-core.js) und
  * broadcastet identische Event-Listen. Manipulierte Client-Stats sind wirkungslos.
  *
- * Protokoll: siehe MULTIPLAYER_PLAN.md §4. Port via $PORT (Default 4250).
+ * P2: Legendären-Klausel (Schnellkampf), Zug-Timer im Request, Reconnect
+ * (Grace-Period + Resume per Token). Protokoll: MULTIPLAYER_PLAN.md §4.
  */
 const { WebSocketServer } = require('ws');
 
-// Geteilte Engine + Spezies-Tabelle (Deploy kopiert battle-core.js daneben).
 let BC; try { BC = require('./battle-core.js'); } catch (e) { BC = require('../js/battle-core.js'); }
 const SPECIES = require('./species.json');
 
 const PORT = parseInt(process.env.PORT || '4250', 10);
-const LEVEL_CAP = 50;          // „Flat-50"-Regelwerk: faire Kämpfe (Plan §5)
+const LEVEL_CAP = 50;
 const MAX_TEAM = 6;
-const TURN_TIMEOUT = 30000;    // ms pro Zug, sonst Auto-Aktion
+const TURN_TIMEOUT = 30000;    // ms pro Zug
+const GRACE_MS = 25000;        // Reconnect-Frist nach Disconnect
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const LEGENDARY = new Set([144, 145, 146, 150, 151]);   // Arktos/Zapdos/Lavados/Mewtu/Mew
 
-const send = (ws, obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+const send = (ws, obj) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); };
 
-let seedCounter = 1;           // deterministischer Seed pro Match (kein Math.random nötig)
+let seedCounter = 1;
 function nextSeed() { return (seedCounter = (seedCounter * 1103515245 + 12345) & 0x7fffffff); }
 function roomCode() { let c = ''; for (let i = 0; i < 4; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return c; }
+function token() { let t = ''; for (let i = 0; i < 16; i++) t += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return t; }
 
 // ------------------------------------------------------- Team-Validierung ---
-/** Client-Team [{id,level}] -> autoritative Kampf-Mons (Server rechnet neu). */
-function buildTeam(raw) {
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_TEAM) return null;
+/** Client-Team [{id,level}] -> {team} oder {error}. Server rechnet Stats neu. */
+function buildTeam(raw, clause) {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_TEAM) return { error: 'bad-team' };
   const team = [];
   for (const m of raw) {
     const id = m && (m.id | 0);
-    if (!SPECIES[id]) return null;
+    if (!SPECIES[id]) return { error: 'bad-team' };
+    if (clause && clause.noLegendary && LEGENDARY.has(id)) return { error: 'no-legendary' };
     const level = Math.max(1, Math.min(LEVEL_CAP, (m.level | 0) || LEVEL_CAP));
     team.push(BC.makeBattleMon(SPECIES[id], level));
   }
-  return team;
+  return { team };
 }
 
 const publicMon = m => ({ id: m.id, level: m.level, maxHp: m.stats.hp, hp: m.hp, status: m.status });
@@ -46,42 +50,51 @@ const selfMon   = m => ({ id: m.id, level: m.level, maxHp: m.stats.hp, hp: m.hp,
                           moves: m.moves.map(mv => ({ name: mv.name, type: mv.type, power: mv.power, acc: mv.acc })) });
 const aliveIdx  = team => team.map((m, i) => (m.hp > 0 ? i : -1)).filter(i => i >= 0);
 
+const activeMatches = new Map();   // token -> { match, side } (für Reconnect)
+
 // ------------------------------------------------------------------ Match ---
 class Match {
-  constructor(a, b) {
+  constructor(a, b, clause) {
     this.id = 'B' + nextSeed().toString(36);
     this.players = [a, b];
     this.teams = [null, null];
     this.state = null;
+    this.clause = clause || {};
     this.rng = BC.makeRng(nextSeed());
     this.phase = 'team';                 // 'team' | 'choose' | 'forceswitch' | 'done'
     this.pending = [null, null];
     this.timer = null;
-    a.c.match = b.c.match = this;
-    a.c.side = 0; b.c.side = 0 + 1;
-    a.c.status = b.c.status = 'match';
-    send(a, { t: 'matched', battleId: this.id, you: 0, oppId: b.c.id });
-    send(b, { t: 'matched', battleId: this.id, you: 1, oppId: a.c.id });
+    this.tokens = [token(), token()];
+    this.disconnected = [false, false];
+    this.grace = [null, null];
+    for (let s = 0; s < 2; s++) {
+      const ws = this.players[s];
+      ws.c.match = this; ws.c.side = s; ws.c.status = 'match';
+      activeMatches.set(this.tokens[s], { match: this, side: s });
+      send(ws, { t: 'matched', battleId: this.id, you: s, oppId: this.players[1 - s].c.id, token: this.tokens[s], clause: this.clause });
+    }
   }
 
   other(side) { return this.players[1 - side]; }
 
   onTeam(side, raw) {
     if (this.phase !== 'team' || this.teams[side]) return;
-    const team = buildTeam(raw);
-    if (!team) { send(this.players[side], { t: 'error', code: 'bad-team' }); return; }
-    this.teams[side] = team;
+    const r = buildTeam(raw, this.clause);
+    if (r.error) { send(this.players[side], { t: 'error', code: r.error }); this.abort(side); return; }
+    this.teams[side] = r.team;
     if (this.teams[0] && this.teams[1]) this.start();
+  }
+
+  abort(offender) {                      // ungültiges Team -> Match auflösen
+    if (this.phase === 'done') return;
+    send(this.other(offender), { t: 'cancelled', reason: 'opp-team' });
+    this.cleanup('idle');
   }
 
   start() {
     this.state = BC.makeBattleState(this.teams[0], this.teams[1]);
     for (let s = 0; s < 2; s++) {
-      send(this.players[s], {
-        t: 'start', you: s,
-        self: this.teams[s].map(selfMon),
-        opp:  this.teams[1 - s].map(publicMon),
-      });
+      send(this.players[s], { t: 'start', you: s, self: this.teams[s].map(selfMon), opp: this.teams[1 - s].map(publicMon) });
     }
     this.requestChoose();
   }
@@ -89,15 +102,22 @@ class Match {
   requestChoose() {
     this.phase = 'choose';
     this.pending = [null, null];
-    for (let s = 0; s < 2; s++) {
-      const sd = this.state.sides[s];
-      send(this.players[s], { t: 'request', turn: this.state.turn + 1, kind: 'choose',
-        options: { canSwitch: aliveIdx(sd.team).filter(i => i !== sd.active) } });
-    }
-    this.arm(() => {                       // Timeout -> fehlende Aktion = Move 0
+    for (let s = 0; s < 2; s++) this.sendRequest(s);
+    this.arm(() => {
       for (let s = 0; s < 2; s++) if (!this.pending[s]) this.pending[s] = { kind: 'move', move: 0 };
       this.resolve();
     });
+  }
+
+  sendRequest(side) {
+    if (this.phase === 'choose') {
+      const sd = this.state.sides[side];
+      send(this.players[side], { t: 'request', turn: this.state.turn + 1, kind: 'choose',
+        deadline: TURN_TIMEOUT, options: { canSwitch: aliveIdx(sd.team).filter(i => i !== sd.active) } });
+    } else if (this.phase === 'forceswitch' && this.state.pendingSwitch[side]) {
+      send(this.players[side], { t: 'request', turn: this.state.turn, kind: 'forceswitch',
+        deadline: TURN_TIMEOUT, options: { switchTo: aliveIdx(this.state.sides[side].team) } });
+    }
   }
 
   onAction(side, msg) {
@@ -130,14 +150,10 @@ class Match {
     this.pending = [null, null];
     for (let s = 0; s < 2; s++) {
       if (!this.state.pendingSwitch[s]) { this.pending[s] = 'ok'; continue; }
-      send(this.players[s], { t: 'request', turn: this.state.turn, kind: 'forceswitch',
-        options: { switchTo: aliveIdx(this.state.sides[s].team) } });
+      this.sendRequest(s);
     }
-    this.arm(() => {                       // Timeout -> erstes lebendes Mon
-      for (let s = 0; s < 2; s++) if (this.pending[s] !== 'ok' && this.pending[s] == null) {
-        const to = aliveIdx(this.state.sides[s].team)[0];
-        this.applySwitch(s, to);
-      }
+    this.arm(() => {
+      for (let s = 0; s < 2; s++) if (this.pending[s] !== 'ok' && this.pending[s] == null) this.applySwitch(s, aliveIdx(this.state.sides[s].team)[0]);
       this.finishForceSwitch();
     });
   }
@@ -156,34 +172,54 @@ class Match {
     this.pending[side] = 'done';
   }
 
-  finishForceSwitch() {
-    this.disarm();
-    this.requestChoose();
-  }
+  finishForceSwitch() { this.disarm(); this.requestChoose(); }
 
   arm(fn) { this.disarm(); this.timer = setTimeout(fn, TURN_TIMEOUT); }
   disarm() { if (this.timer) { clearTimeout(this.timer); this.timer = null; } }
-
   broadcast(obj) { this.players.forEach(p => send(p, obj)); }
+
+  // --- Reconnect ---------------------------------------------------------
+  onLeave(side) {
+    if (this.phase === 'done' || this.phase === 'team') { if (this.phase === 'team') this.cleanup('idle'); return; }
+    if (this.disconnected[side]) return;
+    this.disconnected[side] = true;
+    send(this.other(side), { t: 'oppgone', grace: GRACE_MS });
+    this.grace[side] = setTimeout(() => this.end(1 - side, 'disconnect'), GRACE_MS);
+  }
+
+  resume(ws, side) {
+    if (this.phase === 'done') { send(ws, { t: 'error', code: 'no-match' }); return; }
+    if (this.grace[side]) { clearTimeout(this.grace[side]); this.grace[side] = null; }
+    this.disconnected[side] = false;
+    this.players[side] = ws;
+    ws.c.match = this; ws.c.side = side; ws.c.status = 'match';
+    send(ws, { t: 'resync', you: side,
+      self: this.teams[side].map(selfMon), opp: this.teams[1 - side].map(publicMon),
+      aSelf: this.state.sides[side].active, aOpp: this.state.sides[1 - side].active, phase: this.phase });
+    this.sendRequest(side);                       // ggf. offene Anfrage erneut
+    send(this.other(side), { t: 'oppback' });
+  }
 
   end(winnerSide, reason) {
     if (this.phase === 'done') return;
-    this.phase = 'done'; this.disarm();
-    for (let s = 0; s < 2; s++) {
-      send(this.players[s], { t: 'end', result: winnerSide === s ? 'win' : 'lose', reason });
-      if (this.players[s].c) { this.players[s].c.match = null; this.players[s].c.status = 'idle'; }
-    }
+    this.cleanup('idle', { winnerSide, reason });
   }
 
-  onLeave(side) {                          // Disconnect/Abbruch mitten im Kampf
-    if (this.phase === 'done') return;
-    this.end(1 - side, 'disconnect');
+  cleanup(status, endMsg) {
+    this.phase = 'done'; this.disarm();
+    this.grace.forEach(g => g && clearTimeout(g));
+    this.tokens.forEach(t => activeMatches.delete(t));
+    for (let s = 0; s < 2; s++) {
+      if (endMsg) send(this.players[s], { t: 'end', result: endMsg.winnerSide === s ? 'win' : 'lose', reason: endMsg.reason });
+      const ws = this.players[s];
+      if (ws && ws.c) { ws.c.match = null; ws.c.status = status; }
+    }
   }
 }
 
 // ------------------------------------------------------------ Matchmaking ---
-const queue = [];                 // wartende Clients (Schnellkampf)
-const rooms = new Map();          // code -> wartender Host
+const queue = [];
+const rooms = new Map();
 
 function leaveLobby(ws) {
   const qi = queue.indexOf(ws); if (qi >= 0) queue.splice(qi, 1);
@@ -195,28 +231,28 @@ function tryQuickMatch(ws) {
   leaveLobby(ws);
   while (queue.length) {
     const other = queue.shift();
-    if (other.readyState === 1 && other !== ws) { new Match(other, ws); return; }
+    if (other.readyState === 1 && other !== ws) { new Match(other, ws, { noLegendary: true }); return; }
   }
   queue.push(ws); ws.c.status = 'queue';
 }
 
-function createRoom(ws) {
+function createRoom(ws, opts) {
   leaveLobby(ws);
   let code; do { code = roomCode(); } while (rooms.has(code));
-  rooms.set(code, ws); ws.c.roomCode = code; ws.c.status = 'host';
+  const clause = { noLegendary: !!(opts && opts.noLegendary) };
+  rooms.set(code, { ws, clause }); ws.c.roomCode = code; ws.c.status = 'host';
   send(ws, { t: 'room', code });
 }
 
 function joinRoom(ws, code) {
   code = String(code || '').toUpperCase();
-  const host = rooms.get(code);
-  if (!host || host.readyState !== 1 || host === ws) { send(ws, { t: 'error', code: 'no-room' }); return; }
-  rooms.delete(code); host.c.roomCode = null;
-  new Match(host, ws);
+  const room = rooms.get(code);
+  if (!room || room.ws.readyState !== 1 || room.ws === ws) { send(ws, { t: 'error', code: 'no-room' }); return; }
+  rooms.delete(code); room.ws.c.roomCode = null;
+  new Match(room.ws, ws, room.clause);
 }
 
 // --------------------------------------------------------------- Server ---
-// Nur Loopback — Erreichbarkeit ausschliesslich über den nginx-wss-Proxy.
 const wss = new WebSocketServer({ port: PORT, host: '127.0.0.1' });
 wss.on('listening', () => console.log(`pkmn-battle-server lauscht auf 127.0.0.1:${PORT}`));
 
@@ -232,9 +268,14 @@ wss.on('connection', (ws) => {
     switch (msg.t) {
       case 'hello':  ws.c.id = String(msg.id || '?').slice(0, 12); ws.c.ver = msg.ver; send(ws, { t: 'welcome', id: ws.c.id }); break;
       case 'queue':  if (!m) tryQuickMatch(ws); break;
-      case 'create': if (!m) createRoom(ws); break;
+      case 'create': if (!m) createRoom(ws, msg); break;
       case 'join':   if (!m) joinRoom(ws, msg.code); break;
       case 'cancel': leaveLobby(ws); ws.c.status = 'idle'; break;
+      case 'resume': {
+        const e = activeMatches.get(String(msg.token || ''));
+        if (e && !m) e.match.resume(ws, e.side); else send(ws, { t: 'error', code: 'no-match' });
+        break;
+      }
       case 'team':   if (m) m.onTeam(ws.c.side, msg.mons); break;
       case 'action':
         if (m) { if (m.phase === 'choose') m.onAction(ws.c.side, msg); else if (m.phase === 'forceswitch') m.onForceSwitch(ws.c.side, msg); }
@@ -250,7 +291,6 @@ wss.on('connection', (ws) => {
   ws.on('error', () => {});
 });
 
-// Heartbeat: tote Sockets erkennen/aufräumen
 setInterval(() => {
   wss.clients.forEach(ws => {
     if (!ws.isAlive) return ws.terminate();

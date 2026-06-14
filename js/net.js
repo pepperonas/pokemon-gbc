@@ -65,30 +65,32 @@ const Net = (() => {
     function awaitMatched() {
       return new Promise((res, rej) => {
         const off = on(m => {
-          if (m.t === 'matched') { off(); res({ matched: { you: m.you, oppId: m.oppId, battleId: m.battleId } }); }
+          if (m.t === 'matched') { off(); res({ matched: { you: m.you, oppId: m.oppId, battleId: m.battleId, token: m.token, clause: m.clause } }); }
           else if (m.t === 'error') { off(); rej(m.code || 'error'); }
           else if (m.t === '_closed') { off(); rej('closed'); }
         });
       });
     }
 
+    /** Socket öffnen + Handler verdrahten; onWelcome(res) wird bei 'welcome' aufgerufen. */
+    function openSocket(onWelcome, res, rej) {
+      try { ws = new WebSocket(wsUrl()); } catch (e) { rej('error'); return; }
+      const to = setTimeout(() => rej('timeout'), 6000);
+      ws.onopen = () => sendRaw({ t: 'hello', id: trainerId(), ver: CLIENT_VER });
+      ws.onmessage = e => {
+        let m; try { m = JSON.parse(e.data); } catch (_) { return; }
+        if (m.t === 'welcome') { clearTimeout(to); onWelcome(); res('online'); return; }
+        emit(m);
+      };
+      ws.onerror = () => { clearTimeout(to); rej('error'); };
+      ws.onclose = () => emit({ t: '_closed' });
+    }
+
     return {
       online: true,
       on, send: sendRaw,
-      connect() {
-        return new Promise((res, rej) => {
-          try { ws = new WebSocket(wsUrl()); } catch (e) { rej('error'); return; }
-          const to = setTimeout(() => rej('timeout'), 6000);
-          ws.onopen = () => sendRaw({ t: 'hello', id: trainerId(), ver: CLIENT_VER });
-          ws.onmessage = e => {
-            let m; try { m = JSON.parse(e.data); } catch (_) { return; }
-            if (m.t === 'welcome') { clearTimeout(to); res('online'); }
-            emit(m);
-          };
-          ws.onerror = () => { clearTimeout(to); rej('error'); };
-          ws.onclose = () => emit({ t: '_closed' });
-        });
-      },
+      connect() { return new Promise((res, rej) => openSocket(() => {}, res, rej)); },
+      resume(tok) { return new Promise((res, rej) => openSocket(() => sendRaw({ t: 'resume', token: tok }), res, rej)); },
       quickMatch() { sendRaw({ t: 'queue' }); return awaitMatched(); },
       createRoom() {
         return new Promise((res, rej) => {
@@ -132,5 +134,6 @@ const Net = (() => {
   return {
     available: hasWS,              // echter Server-Transport verfügbar
     trainerId, randomCode, makeTransport, CODE_CHARS, CLIENT_VER,
+    pvpTeam: null,                 // optionales PvP-Team [{id,level}] (PvpTeamScreen)
   };
 })();
