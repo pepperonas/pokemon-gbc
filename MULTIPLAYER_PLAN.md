@@ -10,6 +10,12 @@ die Screens bleiben unverändert.
 > **Status heute:** Lobby live als Vorschau (Mock-Transport, `Net.available=false`).
 > Es fliegt noch kein Datenverkehr nach außen. Dieser Plan beschreibt P0–P3 bis
 > zum produktiven Ranglisten-PvP.
+>
+> **✅ Phase P0 erledigt** — `js/battle-core.js` ist extrahiert (isomorph für
+> Browser + Node), enthält die seedbare RNG (`makeRng`/mulberry32) und ist die
+> gemeinsame Quelle der Wahrheit; `js/battle.js` konsumiert sie, Solo unverändert.
+> Offen aus P0: `resolveTurn(state, a, b, rng)` (event-basierte Rundenauflösung)
+> — folgt zusammen mit dem Server in P1.
 
 ---
 
@@ -49,18 +55,21 @@ die Screens bleiben unverändert.
 
 ### 2.1 Geteilte Kampf-Engine (`battle-core`)
 
-Heute steckt die Kampfmechanik in `js/battle.js`, verwoben mit dem
-`BattleScreen` (Rendering + Eingabe). **P0 extrahiert** die *reine* Logik in ein
-isomorphes Modul `js/battle-core.js` (läuft in Browser **und** Node):
+Früher steckte die Kampfmechanik komplett in `js/battle.js`, verwoben mit dem
+`BattleScreen` (Rendering + Eingabe). **P0 (erledigt)** hat die *reine* Logik in
+das isomorphe Modul **`js/battle-core.js`** ausgelagert (läuft in Browser **und**
+Node, UMD: Browser-Global `BattleCore` bzw. `require()`):
 
-- `effectiveness`, `calcStats`, `expFor`, `damage`, `catchChance`, `EVO`, `CHART`
-- **neu:** seedbarer RNG (`mulberry32(seed)`) statt `Math.random()`, damit
-  Server und beide Clients bitgleich rechnen.
-- `resolveTurn(state, actionA, actionB, rng)` → `events[]` (deterministisch).
+- ✅ `effectiveness`, `calcStats`, `expFor`, `damage`, `catchChance`, `EVO`, `CHART`, `SPECIAL`
+- ✅ seedbarer RNG (`makeRng(seed)` = `mulberry32`) statt `Math.random()`, damit
+  Server und beide Clients bitgleich rechnen. `damage(att, def, move, rng)` nimmt
+  die RNG als Parameter (Default `Math.random` → Solo unverändert).
+- ⬜ **offen:** `resolveTurn(state, actionA, actionB, rng)` → `events[]`
+  (deterministische, event-basierte Rundenauflösung) — kommt in P1.
 
-`battle.js` (Client) wird zu einem dünnen *Renderer*, der `events[]` abspielt —
-egal ob die Events lokal (Solo) oder vom Server (PvP) kommen. Der Server
-importiert exakt dieselbe `battle-core.js`. Eine Quelle der Wahrheit.
+`battle.js` (Client) wird in P1 zu einem dünnen *Renderer*, der `events[]`
+abspielt — egal ob lokal (Solo) oder vom Server (PvP). Der Server importiert
+exakt dieselbe `battle-core.js`. Eine Quelle der Wahrheit.
 
 ---
 
@@ -201,8 +210,8 @@ Hobby-Last locker auf dem bestehenden VPS; bei Bedarf später Cluster + sticky.
 
 | Phase | Inhalt | Ergebnis |
 |-------|--------|----------|
-| **P0** | `battle-core.js` aus `battle.js` extrahieren, seedbarer RNG, Solo nutzt es weiter | Engine isomorph & testbar, Solo unverändert |
-| **P1** | `pkmn-battle-server` (queue/create/join), `WebSocketTransport`, Team-Validierung, `quickMatch` live | **Erster echter PvP-Kampf** Browser↔Browser |
+| **P0 ✅** | `battle-core.js` aus `battle.js` extrahiert, seedbarer RNG, Solo nutzt es weiter | Engine isomorph & testbar, Solo unverändert |
+| **P1** | `resolveTurn` (event-basiert), `pkmn-battle-server` (queue/create/join), `WebSocketTransport`, Team-Validierung, `quickMatch` live | **Erster echter PvP-Kampf** Browser↔Browser |
 | **P2** | Private Räume + Code-Beitritt, Reconnect, Timeouts, Klausel-Sets | Mit Freunden gezielt spielen, stabil |
 | **P3** | Wertung (ELO), Sieg-/Niederlage-Statistik, optional Rangliste, Spectate | Kompetitives Online-Meta |
 

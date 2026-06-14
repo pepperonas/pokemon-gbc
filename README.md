@@ -122,6 +122,7 @@ Ja — **alles liegt in `localStorage`**:
 | `js/world.js` | Multi-Map-System (Overworld 72×60 + 11 Interiors per ASCII-Layout), Warps, Zonen-Encounter, Sicht-Trainer, Arenen, Liga-Gauntlet, Tore, Legendäre, prozedurale Tiles & Charsets |
 | `js/ui.js` | Textbox/Menü-Helfer, Titel, Starterwahl, Pausenmenü, Team, Beutel, Markt, Box, Pokédex, Online-Lobby (Schnellkampf/Raum/Code) |
 | `js/net.js` | Online-Transport-Abstraktion + Mock (Trainer-ID, Raum-Codes); WebSocket-Anbindung folgt laut `MULTIPLAYER_PLAN.md` |
+| `js/battle-core.js` | **Isomorphe** Gen-1-Kampflogik (Typentabelle, Stats, EXP, Schaden, Fangen, Evolutionen) mit **seedbarer RNG** — eine Quelle der Wahrheit für Solo & den künftigen PvP-Server (Browser-Global + Node-`require`) |
 | `js/sound.js` | GBC-artige WebAudio-SFX (Square/Triangle-Bleeps), Mute-Toggle |
 | `js/main.js` | Game-Loop, Screen-Stack, Eingaben (Tastatur + Touch), Speichern/Laden mit Migration, pixel-perfekte Skalierung |
 
