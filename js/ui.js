@@ -553,12 +553,14 @@ const UI = (() => {
   /** Einstiegs-Lobby: Schnellkampf / Raum erstellen / Code eingeben. */
   class OnlineScreen {
     constructor() {
-      this.items = ['SCHNELLKAMPF', 'RAUM OEFFNEN', 'CODE EINGEBEN', 'MEIN TEAM', 'ZURUECK'];
-      this.index = 0; this.t = 0;
+      this.items = ['SCHNELLKAMPF', 'RAUM OEFFNEN', 'CODE EINGEBEN', 'MEIN TEAM', 'RANGLISTE', 'ZURUECK'];
+      this.index = 0; this.t = 0; this.myRank = null;
       this.transport = Net.makeTransport();
       this.status = 'connecting';
       this.busy = false;
-      this.transport.connect().then(() => { this.status = 'online'; }).catch(() => { this.status = 'offline'; });
+      this.transport.connect()
+        .then(() => { this.status = 'online'; Net.fetchRank(Net.trainerId()).then(r => { this.myRank = r; }).catch(() => {}); })
+        .catch(() => { this.status = 'offline'; });
     }
     update(dt) {
       this.t += dt;
@@ -583,6 +585,7 @@ const UI = (() => {
             break;
           case 'CODE EINGEBEN':  Game.push(new OnlineCodeScreen(this.transport)); break;
           case 'MEIN TEAM':      Game.push(new PvpTeamScreen()); break;
+          case 'RANGLISTE':      Game.push(new LeaderboardScreen()); break;
         }
       }
     }
@@ -597,17 +600,17 @@ const UI = (() => {
       const stCol = this.status === 'online' ? '#30b850' : this.status === 'offline' ? '#e03028' : '#f8b800';
       ctx.fillStyle = stCol; ctx.fillRect(20, 38, 6, 6);
       const stTxt = this.status === 'online' ? 'VERBUNDEN' : this.status === 'offline' ? 'OFFLINE' : 'VERBINDE' + dots(this.t);
-      text(ctx, stTxt, 32, 38, '#a8b8d8');
-      text(ctx, 'ID: ' + Net.trainerId(), 32, 50, '#a8b8d8');
+      text(ctx, stTxt, 32, 37, '#a8b8d8');
+      text(ctx, 'ID: ' + Net.trainerId(), 32, 47, '#a8b8d8');
+      text(ctx, this.myRank ? ('ELO ' + this.myRank.elo + '  #' + this.myRank.rank) : 'ELO: noch unranked', 32, 57, '#f8d030');
       // Menü
-      box(ctx, 16, 62, 128, 64);
+      box(ctx, 14, 64, 132, 62);
       this.items.forEach((it, i) => {
-        const y = 70 + i * 11;
-        text(ctx, it, 36, y);
-        if (i === this.index) text(ctx, '>', 26, y);
+        const y = 69 + i * 10;
+        text(ctx, it, 34, y);
+        if (i === this.index) text(ctx, '>', 24, y);
       });
-      if (this.busy) text(ctx, 'Erstelle Raum' + dots(this.t), 24, 132, '#68789a');
-      else text(ctx, 'Schnellk.: ohne Legendaere', 18, 132, '#68789a');
+      text(ctx, this.busy ? 'Erstelle Raum' + dots(this.t) : 'Schnellk.: Rangliste + fair', 18, 132, '#68789a');
     }
   }
 
@@ -992,7 +995,11 @@ const UI = (() => {
           text(ctx, m.hp <= 0 ? 'K.O.' : 'L' + m.level, 120, y);
         });
       } else {
-        textWrapped(ctx, this.msg, 6, 108, 18);
+        textWrapped(ctx, this.msg, 6, this.ended && this.ended.elo ? 104 : 108, 18);
+        if (this.ended && this.ended.elo) {
+          const e = this.ended.elo;
+          text(ctx, 'ELO ' + e.elo + ' (' + (e.delta >= 0 ? '+' : '') + e.delta + ')', 6, 124, e.delta >= 0 ? '#30b850' : '#e03028');
+        }
         if (this.ended) text(ctx, 'A: OK', 132, 134, '#787878');
       }
     }
@@ -1088,11 +1095,32 @@ const UI = (() => {
     }
   }
 
+  /** Rangliste (Top 10 nach ELO) — vom Server geladen. */
+  class LeaderboardScreen {
+    constructor() { this.rows = null; this.err = false; this.t = 0; Net.fetchLeaderboard().then(d => { this.rows = d.top; }).catch(() => { this.err = true; }); }
+    update(dt) { this.t += dt; if (Input.take('a') || Input.take('b')) Game.pop(); }
+    draw(ctx) {
+      ctx.fillStyle = '#283050'; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'RANGLISTE', 8, 8, '#f8d030');
+      if (this.err) { text(ctx, 'Server nicht', 8, 40, '#e03028'); text(ctx, 'erreichbar.', 8, 52, '#e03028'); }
+      else if (!this.rows) { text(ctx, 'Lade' + dots(this.t), 8, 40, '#a8b8d8'); }
+      else if (!this.rows.length) { text(ctx, 'Noch keine Eintraege.', 8, 40, '#a8b8d8'); }
+      else this.rows.slice(0, 10).forEach((r, i) => {
+        const y = 22 + i * 11;
+        text(ctx, String(i + 1).padStart(2), 6, y, i < 3 ? '#f8d030' : '#a8b8d8');
+        text(ctx, String(r.name).toUpperCase().slice(0, 8), 28, y, '#f8f8f8');
+        text(ctx, String(r.elo), 100, y, '#30b850');
+        text(ctx, r.wins + '-' + r.losses, 128, y, '#88a0c8');
+      });
+      text(ctx, 'A/B: Zurueck', 8, 134, '#68789a');
+    }
+  }
+
   return {
     text, textWrapped, box, hpBar, drawSilhouette, drawMonDetail,
     LoadingScreen, TitleScreen, StarterScreen, PauseMenuScreen,
     TeamScreen, BoxScreen, DexScreen, ItemScreen, MartScreen,
     OnlineScreen, OnlineSearchScreen, OnlineCodeScreen, OnlineBattleScreen, PvpTeamScreen,
-    CloudScreen, CloudLoadScreen,
+    CloudScreen, CloudLoadScreen, LeaderboardScreen,
   };
 })();

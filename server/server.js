@@ -20,6 +20,7 @@ const createSync = require('./sync.js');
 
 const PORT = parseInt(process.env.PORT || '4250', 10);
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const db = require('./db.js').open(DATA_DIR);   // Saves + Rangliste (SQLite)
 const LEVEL_CAP = 50;
 const MAX_TEAM = 6;
 const TURN_TIMEOUT = 30000;    // ms pro Zug
@@ -58,12 +59,13 @@ const activeMatches = new Map();   // token -> { match, side } (für Reconnect)
 
 // ------------------------------------------------------------------ Match ---
 class Match {
-  constructor(a, b, clause) {
+  constructor(a, b, clause, ranked) {
     this.id = 'B' + nextSeed().toString(36);
     this.players = [a, b];
     this.teams = [null, null];
     this.state = null;
     this.clause = clause || {};
+    this.ranked = !!ranked;
     this.rng = BC.makeRng(nextSeed());
     this.phase = 'team';                 // 'team' | 'choose' | 'forceswitch' | 'done'
     this.pending = [null, null];
@@ -206,7 +208,12 @@ class Match {
 
   end(winnerSide, reason) {
     if (this.phase === 'done') return;
-    this.cleanup('idle', { winnerSide, reason });
+    let elo = null;                            // Wertung nur im Schnellkampf (ranked)
+    if (this.ranked && (reason === 'ko' || reason === 'disconnect')) {
+      const W = this.players[winnerSide].c, L = this.players[1 - winnerSide].c;
+      try { elo = db.applyElo(W.id, W.name, L.id, L.name); } catch (e) {}
+    }
+    this.cleanup('idle', { winnerSide, reason, elo });
   }
 
   cleanup(status, endMsg) {
@@ -214,7 +221,10 @@ class Match {
     this.grace.forEach(g => g && clearTimeout(g));
     this.tokens.forEach(t => activeMatches.delete(t));
     for (let s = 0; s < 2; s++) {
-      if (endMsg) send(this.players[s], { t: 'end', result: endMsg.winnerSide === s ? 'win' : 'lose', reason: endMsg.reason });
+      if (endMsg) {
+        const myElo = endMsg.elo ? (endMsg.winnerSide === s ? endMsg.elo.winner : endMsg.elo.loser) : null;
+        send(this.players[s], { t: 'end', result: endMsg.winnerSide === s ? 'win' : 'lose', reason: endMsg.reason, elo: myElo });
+      }
       const ws = this.players[s];
       if (ws && ws.c) { ws.c.match = null; ws.c.status = status; }
     }
@@ -235,7 +245,7 @@ function tryQuickMatch(ws) {
   leaveLobby(ws);
   while (queue.length) {
     const other = queue.shift();
-    if (other.readyState === 1 && other !== ws) { new Match(other, ws, { noLegendary: true }); return; }
+    if (other.readyState === 1 && other !== ws) { new Match(other, ws, { noLegendary: true }, true); return; }
   }
   queue.push(ws); ws.c.status = 'queue';
 }
@@ -253,13 +263,13 @@ function joinRoom(ws, code) {
   const room = rooms.get(code);
   if (!room || room.ws.readyState !== 1 || room.ws === ws) { send(ws, { t: 'error', code: 'no-room' }); return; }
   rooms.delete(code); room.ws.c.roomCode = null;
-  new Match(room.ws, ws, room.clause);
+  new Match(room.ws, ws, room.clause, false);   // private Räume: casual (keine Wertung)
 }
 
 // --------------------------------------------------------------- Server ---
 // Ein HTTP-Server für /api/* (Cloud-Sync) + WebSocket-Upgrade. Nur Loopback —
 // Erreichbarkeit ausschliesslich über den nginx-Proxy.
-const handleSync = createSync(DATA_DIR);
+const handleSync = createSync(db);
 const httpServer = http.createServer((req, res) => {
   if (handleSync(req, res)) return;        // /api/* erledigt
   res.writeHead(426, { 'Content-Type': 'text/plain' }); res.end('Upgrade Required');
@@ -277,7 +287,7 @@ wss.on('connection', (ws) => {
     if (!msg || typeof msg.t !== 'string') return;
     const m = ws.c.match;
     switch (msg.t) {
-      case 'hello':  ws.c.id = String(msg.id || '?').slice(0, 12); ws.c.ver = msg.ver; send(ws, { t: 'welcome', id: ws.c.id }); break;
+      case 'hello':  ws.c.id = String(msg.id || '?').slice(0, 12); ws.c.name = String(msg.name || ws.c.id).slice(0, 12); ws.c.ver = msg.ver; send(ws, { t: 'welcome', id: ws.c.id }); break;
       case 'queue':  if (!m) tryQuickMatch(ws); break;
       case 'create': if (!m) createRoom(ws, msg); break;
       case 'join':   if (!m) joinRoom(ws, msg.code); break;

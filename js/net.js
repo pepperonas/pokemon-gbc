@@ -32,13 +32,14 @@ const Net = (() => {
     return id;
   }
 
-  /** Zufälliger 4-stelliger Raum-Code (Ziffern + Großbuchstaben ohne 0/O/1/I). */
+  /** Kryptografisch zufälliger Index (CODE_CHARS.length = 32 teilt 256 -> kein Bias). */
   const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  function randomCode() {
-    let c = '';
-    for (let i = 0; i < 4; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
-    return c;
+  function randIdx(max) {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) { const a = new Uint8Array(1); crypto.getRandomValues(a); return a[0] % max; }
+    return Math.floor(Math.random() * max);
   }
+  function makeCode(len) { let c = ''; for (let i = 0; i < len; i++) c += CODE_CHARS[randIdx(CODE_CHARS.length)]; return c; }
+  const randomCode = () => makeCode(4);
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const CLIENT_VER = 7;
@@ -136,10 +137,7 @@ const Net = (() => {
   // darunter in der Server-DB abgelegt. Zweites Gerät: gleichen Code -> Stand.
   function syncCode() {
     let c = localStorage.getItem('pkmn_synccode');
-    if (!c || !/^[A-Z2-9]{6}$/.test(c)) {
-      c = ''; for (let i = 0; i < 6; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
-      localStorage.setItem('pkmn_synccode', c);
-    }
+    if (!c || !/^[A-Z2-9]{6}$/.test(c)) { c = makeCode(6); localStorage.setItem('pkmn_synccode', c); }
     return c;
   }
   function apiBase() {
@@ -161,10 +159,24 @@ const Net = (() => {
   const syncEnabled = () => localStorage.getItem('pkmn_syncon') === '1';
   const setSyncEnabled = on => localStorage.setItem('pkmn_syncon', on ? '1' : '0');
 
+  // ---------------------------------------------------------- Rangliste ---
+  async function fetchLeaderboard() {
+    const r = await fetch(apiBase() + '/api/leaderboard');
+    if (!r.ok) throw 'http';
+    return r.json();               // { top: [{name,elo,wins,losses}] }
+  }
+  async function fetchRank(id) {
+    const r = await fetch(apiBase() + '/api/rank?id=' + encodeURIComponent(id));
+    if (r.status === 404) return null;
+    if (!r.ok) throw 'http';
+    return r.json();               // { name,elo,wins,losses,rank,total }
+  }
+
   return {
     available: hasWS,              // echter Server-Transport verfügbar
     trainerId, randomCode, makeTransport, CODE_CHARS, CLIENT_VER,
     pvpTeam: null,                 // optionales PvP-Team [{id,level}] (PvpTeamScreen)
     syncCode, uploadSave, downloadSave, syncEnabled, setSyncEnabled,
+    fetchLeaderboard, fetchRank,
   };
 })();

@@ -23,9 +23,14 @@ die Screens bleiben unverändert.
 > (Schnellkampf), Zug-Timer, Reconnect (Grace + Resume-Token).
 >
 > **✅ Accounts/Cloud-Sync (Fundament für P3)** — anonymer 6-Zeichen-Sync-Code,
-> SQLite-Backend (`server/sync.js`, `/api/save`), `CloudScreen` im Pausenmenü,
-> optionaler Auto-Sync. Kein PII; Google-Login bleibt spätere Aufwertung. Liefert
-> die persistente Identität, auf der P3 (Ranked/Rangliste) aufsetzt.
+> SQLite-Backend (`server/sync.js` + `server/db.js`, `/api/save`), `CloudScreen`
+> im Pausenmenü, optionaler Auto-Sync. Kein PII; Google-Login bleibt spätere
+> Aufwertung.
+>
+> **✅ Phase P3 erledigt** — ELO-Wertung (Schnellkampf = ranked, K=32), Rangliste
+> (`/api/leaderboard`, `LeaderboardScreen`), Rang/Statistik (`/api/rank`, ELO in
+> der Lobby + ELO-Delta am Kampfende). Sicherheits-Hardening: CORS-Allowlist,
+> crypto-Codes, Rate-Limit-Eviction, globales Save-Cap.
 
 ---
 
@@ -223,7 +228,8 @@ Hobby-Last locker auf dem bestehenden VPS; bei Bedarf später Cluster + sticky.
 | **P0 ✅** | `battle-core.js` aus `battle.js` extrahiert, seedbarer RNG, Solo nutzt es weiter | Engine isomorph & testbar, Solo unverändert |
 | **P1 ✅** | `resolveTurn` (event-basiert), `server/server.js` (queue/create/join), `WebSocketTransport` + `OnlineBattleScreen`, Team-Validierung, Timeouts, Disconnect→Forfeit | **Echter PvP-Kampf live** auf wss://pokemon.celox.io/ws |
 | **P2 ✅** | PvP-Team-Auswahl (Party+Box), Legendären-Klausel (Schnellkampf), Zug-Timer, Reconnect (Grace + Resume-Token) | Stabiler & fairer, Disconnect ≠ sofort verloren |
-| **P3** | Wertung (ELO), Sieg-/Niederlage-Statistik, optional Rangliste, Spectate | Kompetitives Online-Meta |
+| **P3 ✅** | ELO-Wertung (Schnellkampf=ranked), Rangliste, Rang/Statistik, ELO-Delta am Kampfende | Kompetitives Meta mit Identität |
+| **P4** | Replays/Spectate (Seed+Event-Log → quasi geschenkt), Tausch zwischen Accounts, Freunde/Saisons | Social & Endgame |
 
 P0 ist reine Client-Refaktorierung (kein Risiko, sofort startbar). Ab P1 läuft
 der Server. Die Lobby-Screens stehen bereits.
