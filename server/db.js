@@ -25,6 +25,8 @@ module.exports.open = function open(dataDir) {
       elo INTEGER NOT NULL DEFAULT ${START_ELO},
       wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS replays (
+      id TEXT PRIMARY KEY, name0 TEXT, name1 TEXT, winner INTEGER, ts INTEGER NOT NULL, data_json TEXT NOT NULL);
   `);
 
   const sGet = db.prepare('SELECT save_json, updated_at FROM saves WHERE code = ?');
@@ -52,6 +54,16 @@ module.exports.open = function open(dataDir) {
     return { winner: { elo: wNew, delta: wNew - w.elo }, loser: { elo: lNew, delta: lNew - l.elo } };
   }
 
+  const rPut = db.prepare('INSERT INTO replays (id, name0, name1, winner, ts, data_json) VALUES (?, ?, ?, ?, ?, ?)');
+  const rPrune = db.prepare('DELETE FROM replays WHERE id NOT IN (SELECT id FROM replays ORDER BY ts DESC LIMIT 50)');
+  const rList = db.prepare('SELECT id, name0, name1, winner, ts FROM replays ORDER BY ts DESC LIMIT ?');
+  const rGet = db.prepare('SELECT data_json FROM replays WHERE id = ?');
+
+  function saveReplay(rec) {
+    rPut.run(rec.id, rec.name0, rec.name1, rec.winner, Date.now(), JSON.stringify(rec.data));
+    rPrune.run();                                  // nur die letzten 50 behalten
+  }
+
   return {
     saveGet: c => sGet.get(c),
     savePut: (c, j, u) => sPut.run(c, j, u),
@@ -59,5 +71,8 @@ module.exports.open = function open(dataDir) {
     applyElo,
     leaderboard: (n = 20) => pTop.all(n),
     rank: id => { const p = pGet.get(id); return p ? { name: p.name, elo: p.elo, wins: p.wins, losses: p.losses, rank: pAbove.get(p.elo).n + 1, total: pCount.get().n } : null; },
+    saveReplay,
+    listReplays: (n = 20) => rList.all(n),
+    getReplay: id => { const r = rGet.get(id); return r ? JSON.parse(r.data_json) : null; },
   };
 };

@@ -229,7 +229,7 @@ Hobby-Last locker auf dem bestehenden VPS; bei Bedarf später Cluster + sticky.
 | **P1 ✅** | `resolveTurn` (event-basiert), `server/server.js` (queue/create/join), `WebSocketTransport` + `OnlineBattleScreen`, Team-Validierung, Timeouts, Disconnect→Forfeit | **Echter PvP-Kampf live** auf wss://pokemon.celox.io/ws |
 | **P2 ✅** | PvP-Team-Auswahl (Party+Box), Legendären-Klausel (Schnellkampf), Zug-Timer, Reconnect (Grace + Resume-Token) | Stabiler & fairer, Disconnect ≠ sofort verloren |
 | **P3 ✅** | ELO-Wertung (Schnellkampf=ranked), Rangliste, Rang/Statistik, ELO-Delta am Kampfende | Kompetitives Meta mit Identität |
-| **P4 (teilw. ✅)** | **Live-Tausch ✅** (inkl. Tausch-Evolution). Offen: Replays/Spectate (Seed+Event-Log → quasi geschenkt), Tausch-Räume per Code, Freunde/Saisons | Social & Endgame |
+| **P4 (teilw. ✅)** | **Live-Tausch ✅** (inkl. Tausch-Evolution) · **Replays ✅** (Seed+Aktions-Log, deterministische Wiedergabe). Offen: Live-Spectate, Tausch-Räume per Code, Freunde/Saisons | Social & Endgame |
 
 P0 ist reine Client-Refaktorierung (kein Risiko, sofort startbar). Ab P1 läuft
 der Server. Die Lobby-Screens stehen bereits.

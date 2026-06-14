@@ -50,6 +50,13 @@ module.exports = function createSync(db) {
 
     if (u.pathname === '/api/health' && req.method === 'GET') { json(200, { ok: true, saves: db.saveCount() }); return true; }
     if (u.pathname === '/api/leaderboard' && req.method === 'GET') { json(200, { top: db.leaderboard(20) }); return true; }
+    if (u.pathname === '/api/replays' && req.method === 'GET') { json(200, { list: db.listReplays(20) }); return true; }
+    if (u.pathname === '/api/replay' && req.method === 'GET') {
+      const id = String(u.searchParams.get('id') || '');
+      if (!/^[A-Za-z0-9]{1,16}$/.test(id)) { json(400, { error: 'bad-id' }); return true; }
+      const r = db.getReplay(id);
+      json(r ? 200 : 404, r || { error: 'not-found' }); return true;
+    }
     if (u.pathname === '/api/rank' && req.method === 'GET') {
       const id = String(u.searchParams.get('id') || '');
       if (!ID_RE.test(id)) { json(400, { error: 'bad-id' }); return true; }

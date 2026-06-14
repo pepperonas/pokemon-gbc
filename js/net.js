@@ -177,12 +177,23 @@ const Net = (() => {
     if (!r.ok) throw 'http';
     return r.json();               // { name,elo,wins,losses,rank,total }
   }
+  async function fetchReplays() {
+    const r = await fetch(apiBase() + '/api/replays');
+    if (!r.ok) throw 'http';
+    return r.json();               // { list: [{id,name0,name1,winner,ts}] }
+  }
+  async function fetchReplay(id) {
+    const r = await fetch(apiBase() + '/api/replay?id=' + encodeURIComponent(id));
+    if (r.status === 404) return null;
+    if (!r.ok) throw 'http';
+    return r.json();               // { seed, teamA, teamB, log, name0, name1, winner }
+  }
 
   return {
     available: hasWS,              // echter Server-Transport verfügbar
     trainerId, randomCode, makeTransport, CODE_CHARS, CLIENT_VER,
     pvpTeam: null,                 // optionales PvP-Team [{id,level}] (PvpTeamScreen)
     syncCode, uploadSave, downloadSave, syncEnabled, setSyncEnabled,
-    fetchLeaderboard, fetchRank,
+    fetchLeaderboard, fetchRank, fetchReplays, fetchReplay,
   };
 })();

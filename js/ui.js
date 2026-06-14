@@ -553,7 +553,7 @@ const UI = (() => {
   /** Einstiegs-Lobby: Schnellkampf / Raum erstellen / Code eingeben. */
   class OnlineScreen {
     constructor() {
-      this.items = ['SCHNELLKAMPF', 'RAUM OEFFNEN', 'CODE EINGEBEN', 'MEIN TEAM', 'RANGLISTE', 'TAUSCH', 'ZURUECK'];
+      this.items = ['SCHNELLKAMPF', 'RAUM OEFFNEN', 'CODE EINGEBEN', 'MEIN TEAM', 'RANGLISTE', 'TAUSCH', 'REPLAYS', 'ZURUECK'];
       this.index = 0; this.t = 0; this.myRank = null;
       this.transport = Net.makeTransport();
       this.status = 'connecting';
@@ -587,6 +587,7 @@ const UI = (() => {
           case 'MEIN TEAM':      Game.push(new PvpTeamScreen()); break;
           case 'RANGLISTE':      Game.push(new LeaderboardScreen()); break;
           case 'TAUSCH':         Game.push(new OnlineSearchScreen(this.transport, 'trade')); break;
+          case 'REPLAYS':        Game.push(new ReplayListScreen()); break;
         }
       }
     }
@@ -604,10 +605,10 @@ const UI = (() => {
       text(ctx, stTxt, 20, 29, '#a8b8d8');
       text(ctx, 'ID ' + Net.trainerId(), 84, 29, '#a8b8d8');
       text(ctx, this.myRank ? ('ELO ' + this.myRank.elo + '  #' + this.myRank.rank + '/' + this.myRank.total) : 'ELO: noch unranked', 20, 40, '#f8d030');
-      // Menü (7 Einträge)
+      // Menü (8 Einträge)
       box(ctx, 12, 48, 136, 90);
       this.items.forEach((it, i) => {
-        const y = 55 + i * 11;
+        const y = 53 + i * 10;
         text(ctx, it, 34, y);
         if (i === this.index) text(ctx, '>', 22, y);
       });
@@ -1234,11 +1235,81 @@ const UI = (() => {
     }
   }
 
+  /** Liste der letzten Ranglisten-Kämpfe (Replays). */
+  class ReplayListScreen {
+    constructor() { this.list = null; this.err = false; this.index = 0; this.t = 0; this.loading = false; Net.fetchReplays().then(d => { this.list = d.list; }).catch(() => { this.err = true; }); }
+    update(dt) {
+      this.t += dt;
+      if (this.loading) return;
+      if (Input.take('b')) { Game.pop(); return; }
+      if (!this.list || !this.list.length) return;
+      const n = this.list.length;
+      if (Input.take('up'))   { this.index = (this.index + n - 1) % n; Sound.cursor(); }
+      if (Input.take('down')) { this.index = (this.index + 1) % n; Sound.cursor(); }
+      if (Input.take('a')) {
+        this.loading = true; Sound.confirm();
+        Net.fetchReplay(this.list[this.index].id)
+          .then(d => { this.loading = false; if (d) { Game.pop(); Game.push(new ReplayScreen(d)); } })
+          .catch(() => { this.loading = false; });
+      }
+    }
+    draw(ctx) {
+      ctx.fillStyle = '#283050'; ctx.fillRect(0, 0, 160, 144);
+      text(ctx, 'REPLAYS', 8, 8, '#f8d030');
+      if (this.err) text(ctx, 'Server nicht erreichbar.', 8, 40, '#e03028');
+      else if (!this.list) text(ctx, 'Lade' + dots(this.t), 8, 40, '#a8b8d8');
+      else if (!this.list.length) text(ctx, 'Noch keine Replays.', 8, 40, '#a8b8d8');
+      else this.list.slice(0, 10).forEach((r, i) => {
+        const y = 22 + i * 11;
+        if (i === this.index) text(ctx, '>', 4, y);
+        text(ctx, String(r.name0 || 'P1').slice(0, 6), 14, y, r.winner === 0 ? '#f8d030' : '#a8b8d8');
+        text(ctx, 'vs', 70, y, '#88a0c8');
+        text(ctx, String(r.name1 || 'P2').slice(0, 6), 90, y, r.winner === 1 ? '#f8d030' : '#a8b8d8');
+      });
+      text(ctx, this.loading ? 'Lade Replay...' : 'A: Ansehen   B: Zurueck', 8, 134, '#68789a');
+    }
+  }
+
+  /**
+   * Replay-Wiedergabe: rechnet den Kampf aus Seed + Aktions-Log deterministisch
+   * mit BattleCore lokal nach und treibt damit den normalen Kampf-Screen.
+   */
+  class ReplayScreen {
+    constructor(data) {
+      const BC = BattleCore;
+      const teamA = data.teamA.map(t => BC.makeBattleMon(Data.byId(t.id), t.level));
+      const teamB = data.teamB.map(t => BC.makeBattleMon(Data.byId(t.id), t.level));
+      const selfArr = teamA.map(m => ({ id: m.id, level: m.level, maxHp: m.stats.hp, hp: m.stats.hp, status: null, moves: m.moves.map(mv => ({ name: mv.name, type: mv.type, power: mv.power, acc: mv.acc })) }));
+      const oppArr = teamB.map(m => ({ id: m.id, level: m.level, maxHp: m.stats.hp, hp: m.stats.hp, status: null }));
+      const rng = BC.makeRng(data.seed), state = BC.makeBattleState(teamA, teamB), events = [];
+      for (const step of data.log) {
+        if (step.k === 't') events.push(...BC.resolveTurn(state, step.a, rng).events);
+        else if (step.k === 's') events.push(...BC.applyForcedSwitch(state, step.side, step.to));
+        if (state.winner != null) break;
+      }
+      this.names = (data.name0 || 'P1') + ' vs ' + (data.name1 || 'P2');
+      this.inner = new OnlineBattleScreen({ on: () => (() => {}), send: () => {} }, { you: 0, token: null });
+      this.inner.onMsg({ t: 'start', you: 0, self: selfArr, opp: oppArr });
+      for (const e of events) this.inner.queue.push(e);
+      this.endMsg = { t: 'end', result: state.winner === 0 ? 'win' : 'lose', reason: 'ko' };
+      this.endSent = false;
+    }
+    update(dt) {
+      if (!this.endSent && !this.inner.cur && !this.inner.queue.length && !this.inner.ended) { this.inner.onMsg(this.endMsg); this.endSent = true; }
+      this.inner.update(dt);
+    }
+    draw(ctx) {
+      this.inner.draw(ctx);
+      ctx.fillStyle = '#e03028'; ctx.fillRect(2, 2, 40, 10);
+      text(ctx, 'REPLAY', 4, 4, '#f8f8f8');
+    }
+  }
+
   return {
     text, textWrapped, box, hpBar, drawSilhouette, drawMonDetail,
     LoadingScreen, TitleScreen, StarterScreen, PauseMenuScreen,
     TeamScreen, BoxScreen, DexScreen, ItemScreen, MartScreen,
     OnlineScreen, OnlineSearchScreen, OnlineCodeScreen, OnlineBattleScreen, PvpTeamScreen,
-    CloudScreen, CloudLoadScreen, LeaderboardScreen, TradeScreen,
+    CloudScreen, CloudLoadScreen, LeaderboardScreen, TradeScreen, ReplayListScreen, ReplayScreen,
   };
 })();

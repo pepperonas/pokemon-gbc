@@ -66,7 +66,9 @@ class Match {
     this.state = null;
     this.clause = clause || {};
     this.ranked = !!ranked;
-    this.rng = BC.makeRng(nextSeed());
+    this.seed = nextSeed();
+    this.rng = BC.makeRng(this.seed);
+    this.log = [];                       // Aktions-Log für Replays (Seed + log -> deterministisch)
     this.phase = 'team';                 // 'team' | 'choose' | 'forceswitch' | 'done'
     this.pending = [null, null];
     this.timer = null;
@@ -144,6 +146,7 @@ class Match {
 
   resolve() {
     this.disarm();
+    if (this.log.length < 300) this.log.push({ k: 't', a: this.pending.map(x => x.kind === 'switch' ? { kind: 'switch', to: x.to } : { kind: 'move', move: x.move }) });
     const { events } = BC.resolveTurn(this.state, this.pending, this.rng);
     this.broadcast({ t: 'turn', turn: this.state.turn, events });
     if (this.state.winner != null) return this.end(this.state.winner, 'ko');
@@ -173,6 +176,7 @@ class Match {
   }
 
   applySwitch(side, to) {
+    if (this.log.length < 300) this.log.push({ k: 's', side, to });
     const events = BC.applyForcedSwitch(this.state, side, to);
     this.broadcast({ t: 'turn', turn: this.state.turn, events });
     this.pending[side] = 'done';
@@ -212,6 +216,11 @@ class Match {
     if (this.ranked && (reason === 'ko' || reason === 'disconnect')) {
       const W = this.players[winnerSide].c, L = this.players[1 - winnerSide].c;
       try { elo = db.applyElo(W.id, W.name, L.id, L.name); } catch (e) {}
+      if (this.log.length) try {
+        const n0 = this.players[0].c.name, n1 = this.players[1].c.name;
+        db.saveReplay({ id: 'R' + Date.now().toString(36) + nextSeed().toString(36).slice(-3), name0: n0, name1: n1, winner: winnerSide,
+          data: { seed: this.seed, teamA: this.teams[0].map(m => ({ id: m.id, level: m.level })), teamB: this.teams[1].map(m => ({ id: m.id, level: m.level })), log: this.log, winner: winnerSide, name0: n0, name1: n1, ts: Date.now() } });
+      } catch (e) {}
     }
     this.cleanup('idle', { winnerSide, reason, elo });
   }
