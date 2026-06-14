@@ -27,6 +27,10 @@ module.exports.open = function open(dataDir) {
       updated_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS replays (
       id TEXT PRIMARY KEY, name0 TEXT, name1 TEXT, winner INTEGER, ts INTEGER NOT NULL, data_json TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS accounts (
+      sub TEXT PRIMARY KEY, email TEXT, name TEXT NOT NULL, created_at INTEGER NOT NULL, last_login INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY, sub TEXT NOT NULL, name TEXT NOT NULL, expires INTEGER NOT NULL);
   `);
 
   const sGet = db.prepare('SELECT save_json, updated_at FROM saves WHERE code = ?');
@@ -64,10 +68,22 @@ module.exports.open = function open(dataDir) {
     rPrune.run();                                  // nur die letzten 50 behalten
   }
 
+  // --- Accounts + Sessions (Google-Login) ---
+  const aPut = db.prepare(`INSERT INTO accounts (sub, email, name, created_at, last_login) VALUES (@sub, @email, @name, @now, @now)
+                           ON CONFLICT(sub) DO UPDATE SET email = excluded.email, name = excluded.name, last_login = excluded.last_login`);
+  const sehPut = db.prepare('INSERT OR REPLACE INTO sessions (token, sub, name, expires) VALUES (?, ?, ?, ?)');
+  const seGet = db.prepare('SELECT sub, name, expires FROM sessions WHERE token = ?');
+  const seDel = db.prepare('DELETE FROM sessions WHERE token = ?');
+  const SESSION_MS = 90 * 24 * 3600 * 1000;
+
   return {
     saveGet: c => sGet.get(c),
     savePut: (c, j, u) => sPut.run(c, j, u),
     saveCount: () => sCount.get().n,
+    upsertAccount: ({ sub, email, name }) => aPut.run({ sub, email: email || null, name, now: Date.now() }),
+    createSession: (token, sub, name) => sehPut.run(token, sub, name, Date.now() + SESSION_MS),
+    getSession: token => { const s = seGet.get(token); if (!s) return null; if (s.expires < Date.now()) { seDel.run(token); return null; } return { sub: s.sub, name: s.name }; },
+    deleteSession: token => seDel.run(token),
     applyElo,
     leaderboard: (n = 20) => pTop.all(n),
     rank: id => { const p = pGet.get(id); return p ? { name: p.name, elo: p.elo, wins: p.wins, losses: p.losses, rank: pAbove.get(p.elo).n + 1, total: pCount.get().n } : null; },

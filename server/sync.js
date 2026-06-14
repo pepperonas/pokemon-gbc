@@ -34,7 +34,7 @@ module.exports = function createSync(db) {
   // CORS-Header -> Cross-Origin-Schreibzugriff Dritter scheitert; same-origin
   // (Prod via nginx) funktioniert ohnehin ohne CORS.
   function corsFor(origin) {
-    const h = { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Vary': 'Origin' };
+    const h = { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Vary': 'Origin' };
     if (origin && ALLOW_ORIGIN.test(origin)) h['Access-Control-Allow-Origin'] = origin;
     return h;
   }
@@ -63,6 +63,29 @@ module.exports = function createSync(db) {
       const r = db.rank(id);
       json(r ? 200 : 404, r || { error: 'not-found' }); return true;
     }
+    // Kontogebundener Speicherstand (Bearer-Session) — kein Code nötig.
+    if (u.pathname === '/api/account/save') {
+      const ah = req.headers.authorization || '';
+      const sess = ah.startsWith('Bearer ') ? db.getSession(ah.slice(7)) : null;
+      if (!sess) { json(401, { error: 'auth' }); return true; }
+      const key = 'acct:' + sess.sub;
+      if (req.method === 'GET') { const row = db.saveGet(key); json(row ? 200 : 404, row ? { save: row.save_json, updated_at: row.updated_at } : { error: 'not-found' }); return true; }
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', c => { body += c; if (body.length > MAX_SAVE) req.destroy(); });
+        req.on('end', () => {
+          let p; try { p = JSON.parse(body); } catch (e) { return json(400, { error: 'bad-json' }); }
+          if (typeof p.save !== 'string' || p.save.length > MAX_SAVE) return json(400, { error: 'bad-save' });
+          try { JSON.parse(p.save); } catch (e) { return json(400, { error: 'bad-save' }); }
+          const updated_at = Date.now();
+          db.savePut(key, p.save, updated_at);
+          json(200, { ok: true, updated_at });
+        });
+        return true;
+      }
+      json(405, { error: 'method' }); return true;
+    }
+
     if (u.pathname === '/api/save' && req.method === 'GET') {
       const code = (u.searchParams.get('code') || '').toUpperCase();
       if (!CODE_RE.test(code)) { json(400, { error: 'bad-code' }); return true; }

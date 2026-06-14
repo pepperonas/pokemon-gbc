@@ -12,11 +12,16 @@
  */
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
+
+// Kurze, stabile Ranglisten-ID aus dem Google-sub (passt in [\w-]{1,12}).
+const accountId = sub => 'g' + crypto.createHash('sha256').update(String(sub)).digest('hex').slice(0, 11);
 
 let BC; try { BC = require('./battle-core.js'); } catch (e) { BC = require('../js/battle-core.js'); }
 const SPECIES = require('./species.json');
 const createSync = require('./sync.js');
+const createAuth = require('./auth.js');
 
 const PORT = parseInt(process.env.PORT || '4250', 10);
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -329,8 +334,11 @@ function joinRoom(ws, code) {
 // Ein HTTP-Server für /api/* (Cloud-Sync) + WebSocket-Upgrade. Nur Loopback —
 // Erreichbarkeit ausschliesslich über den nginx-Proxy.
 const handleSync = createSync(db);
-const httpServer = http.createServer((req, res) => {
-  if (handleSync(req, res)) return;        // /api/* erledigt
+const auth = createAuth(db, { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET, redirectUri: process.env.OAUTH_REDIRECT, siteUrl: process.env.SITE_URL });
+const httpServer = http.createServer(async (req, res) => {
+  let u; try { u = new URL(req.url, 'http://x'); } catch (e) { res.writeHead(400); res.end(); return; }
+  try { if (await auth.handle(req, res, u)) return; } catch (e) { res.writeHead(500); res.end(); return; }   // /api/auth/*
+  if (handleSync(req, res)) return;        // übrige /api/* erledigt
   res.writeHead(426, { 'Content-Type': 'text/plain' }); res.end('Upgrade Required');
 });
 const wss = new WebSocketServer({ server: httpServer });
@@ -346,7 +354,13 @@ wss.on('connection', (ws) => {
     if (!msg || typeof msg.t !== 'string') return;
     const m = ws.c.match;
     switch (msg.t) {
-      case 'hello':  ws.c.id = String(msg.id || '?').slice(0, 12); ws.c.name = String(msg.name || ws.c.id).slice(0, 12); ws.c.ver = msg.ver; send(ws, { t: 'welcome', id: ws.c.id }); break;
+      case 'hello': {
+        let id = String(msg.id || '?').slice(0, 12), name = String(msg.name || id).slice(0, 16);
+        if (msg.token) { const s = db.getSession(String(msg.token)); if (s) { id = accountId(s.sub); name = s.name; } }   // angemeldet -> Account-Identität
+        ws.c.id = id; ws.c.name = name; ws.c.ver = msg.ver;
+        send(ws, { t: 'welcome', id, name });
+        break;
+      }
       case 'queue':  if (!m) tryQuickMatch(ws); break;
       case 'create': if (!m) createRoom(ws, msg); break;
       case 'join':   if (!m) joinRoom(ws, msg.code); break;

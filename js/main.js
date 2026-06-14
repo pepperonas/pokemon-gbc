@@ -148,8 +148,9 @@ const Game = {
     if (Game.player && now - lastAutoSave >= AUTOSAVE_MS) {
       lastAutoSave = now;
       Game.save();
-      // Optionaler stiller Cloud-Sync (wenn aktiviert)
-      if (Net.syncEnabled()) Net.uploadSave(Net.syncCode(), localStorage.getItem(SAVE_KEY)).catch(() => {});
+      // Optionaler stiller Cloud-Sync: angemeldet -> Konto, sonst Sync-Code
+      if (Net.isLoggedIn()) Net.accountUploadSave(localStorage.getItem(SAVE_KEY)).catch(() => {});
+      else if (Net.syncEnabled()) Net.uploadSave(Net.syncCode(), localStorage.getItem(SAVE_KEY)).catch(() => {});
     }
 
     Input.beginFrame();
@@ -199,6 +200,15 @@ const Game = {
   window.addEventListener('load', async () => {
     bindTouch();
     resize();
+
+    // Google-Login-Rücksprung: #sess=<token>&name=<name> auswerten + Hash entfernen
+    if (location.hash && location.hash.indexOf('sess=') >= 0) {
+      const h = new URLSearchParams(location.hash.slice(1));
+      if (h.get('sess')) Net.setSession(h.get('sess'), h.get('name') || 'TRAINER');
+      history.replaceState(null, '', location.pathname + location.search);
+    } else if (location.hash.indexOf('autherr') >= 0) {
+      history.replaceState(null, '', location.pathname + location.search);
+    }
 
     const loading = new UI.LoadingScreen();
     Game.screens = [loading];

@@ -58,6 +58,7 @@ const Net = (() => {
    */
   function WebSocketTransport() {
     let ws = null;
+    let serverId = null;                 // vom Server zugewiesene Ranglisten-ID (Konto oder TR-)
     const listeners = new Set();
     const emit = m => listeners.forEach(fn => fn(m));
     const on = fn => { listeners.add(fn); return () => listeners.delete(fn); };
@@ -77,10 +78,10 @@ const Net = (() => {
     function openSocket(onWelcome, res, rej) {
       try { ws = new WebSocket(wsUrl()); } catch (e) { rej('error'); return; }
       const to = setTimeout(() => rej('timeout'), 6000);
-      ws.onopen = () => sendRaw({ t: 'hello', id: trainerId(), ver: CLIENT_VER });
+      ws.onopen = () => sendRaw({ t: 'hello', id: trainerId(), name: accountName() || trainerId(), ver: CLIENT_VER, token: session() || undefined });
       ws.onmessage = e => {
         let m; try { m = JSON.parse(e.data); } catch (_) { return; }
-        if (m.t === 'welcome') { clearTimeout(to); onWelcome(); res('online'); return; }
+        if (m.t === 'welcome') { serverId = m.id; clearTimeout(to); onWelcome(); res('online'); return; }
         emit(m);
       };
       ws.onerror = () => { clearTimeout(to); rej('error'); };
@@ -90,6 +91,7 @@ const Net = (() => {
     return {
       online: true,
       on, send: sendRaw,
+      get serverId() { return serverId; },
       connect() { return new Promise((res, rej) => openSocket(() => {}, res, rej)); },
       resume(tok) { return new Promise((res, rej) => openSocket(() => sendRaw({ t: 'resume', token: tok }), res, rej)); },
       quickMatch() { sendRaw({ t: 'queue' }); return awaitMatched(); },
@@ -165,6 +167,30 @@ const Net = (() => {
   const syncEnabled = () => localStorage.getItem('pkmn_syncon') === '1';
   const setSyncEnabled = on => localStorage.setItem('pkmn_syncon', on ? '1' : '0');
 
+  // -------------------------------------------------- Google-Login/Konto ---
+  const session = () => localStorage.getItem('pkmn_session') || null;
+  const accountName = () => localStorage.getItem('pkmn_account_name') || null;
+  const isLoggedIn = () => !!session();
+  const loginUrl = () => apiBase() + '/api/auth/google';
+  function setSession(token, name) { localStorage.setItem('pkmn_session', token); localStorage.setItem('pkmn_account_name', name || 'TRAINER'); }
+  async function logout() {
+    const t = session();
+    localStorage.removeItem('pkmn_session'); localStorage.removeItem('pkmn_account_name');
+    if (t) try { await fetch(apiBase() + '/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t }) }); } catch (e) {}
+  }
+  async function accountUploadSave(saveStr) {
+    const t = session(); if (!t) throw 'noauth';
+    const r = await fetch(apiBase() + '/api/account/save', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t }, body: JSON.stringify({ save: saveStr }) });
+    if (r.status === 401) throw 'auth'; if (!r.ok) throw 'http';
+    return r.json();
+  }
+  async function accountDownloadSave() {
+    const t = session(); if (!t) throw 'noauth';
+    const r = await fetch(apiBase() + '/api/account/save', { headers: { 'Authorization': 'Bearer ' + t } });
+    if (r.status === 404) return null; if (r.status === 401) throw 'auth'; if (!r.ok) throw 'http';
+    return r.json();
+  }
+
   // ---------------------------------------------------------- Rangliste ---
   async function fetchLeaderboard() {
     const r = await fetch(apiBase() + '/api/leaderboard');
@@ -195,5 +221,6 @@ const Net = (() => {
     pvpTeam: null,                 // optionales PvP-Team [{id,level}] (PvpTeamScreen)
     syncCode, uploadSave, downloadSave, syncEnabled, setSyncEnabled,
     fetchLeaderboard, fetchRank, fetchReplays, fetchReplay,
+    session, accountName, isLoggedIn, loginUrl, setSession, logout, accountUploadSave, accountDownloadSave,
   };
 })();
