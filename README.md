@@ -129,9 +129,11 @@ Ja — **alles liegt in `localStorage`**:
 | `server/` | Node-Service: autoritativer PvP-WebSocket-Server (Matchmaking, Räume, Team-Validierung, Turn-Loop, Reconnect) **+ Cloud-Sync HTTP-API** (`sync.js`, SQLite via better-sqlite3). Nutzt `battle-core.js` + `species.json`. Deploy: systemd `pkmn-battle` + nginx-`/ws`- & `/api/`-Proxy |
 | `js/battle-core.js` | **Isomorphe** Gen-1-Kampflogik (Typentabelle, Stats, EXP, Schaden, Fangen, Evolutionen) mit **seedbarer RNG** — eine Quelle der Wahrheit für Solo & den künftigen PvP-Server (Browser-Global + Node-`require`) |
 | `js/sound.js` | GBC-artige WebAudio-SFX (Square/Triangle-Bleeps), Mute-Toggle |
-| `js/main.js` | Game-Loop, Screen-Stack, Eingaben (Tastatur + Touch), Speichern/Laden mit Migration, pixel-perfekte Skalierung |
+| `js/main.js` | Game-Loop, Screen-Stack, Eingaben (Tastatur + Touch), Speichern/Laden mit Migration, DPR-pixelperfekte Skalierung |
 
-Nativ **160×144 px** (GBC), ganzzahlig hochskaliert mit `image-rendering: pixelated`. Kein Framework, kein Build-Schritt, keine Laufzeit-Abhängigkeiten — Daten und Sprites sind gebündelt, die Pixel-Font ist optional (Monospace-Fallback).
+Nativ **160×144 px** (GBC), hochskaliert mit `image-rendering: pixelated`. Die Skalierung rundet **ganzzahlig in Geräte-Pixeln** (nicht in CSS-Pixeln) — jeder Spiel-Pixel belegt exakt N Hardware-Pixel, dadurch füllt das Display auf High-DPI-Handys den Rahmen merklich besser und bleibt trotzdem scharf. Kein Framework, kein Build-Schritt, keine Laufzeit-Abhängigkeiten — Daten und Sprites sind gebündelt, die Pixel-Font ist optional (Monospace-Fallback).
+
+Die Pixel-Font *Press Start 2P* ist exakt **8 px/Zeichen** breit — pro Zeile passen also nur 20 Zeichen. Der `UI.text()`-Helfer **verkleinert die Schrift automatisch proportional** (bis 5 px), falls ein Label sonst über den rechten Rand liefe; Überschriften nutzen `UI.ctext()` (gemessen zentriert). So wird garantiert kein Menü-Text abgeschnitten.
 
 Der Kampfablauf ist als **async-Koroutine** implementiert: `await say(…)` / `await choose(…)` warten über ein pro Frame aufgelöstes Promise (`Game.nextFrame()`) auf den Game-Loop — der Kampf liest sich dadurch wie ein lineares Skript.
 
