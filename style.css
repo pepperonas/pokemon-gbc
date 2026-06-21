@@ -29,7 +29,8 @@ html, body {
   width: 100%;
   display: flex;
   justify-content: center;
-  padding: 14px;
+  /* schmaler Rahmen -> mehr Platz fürs Display (besonders auf Handys) */
+  padding: 6px;
 }
 
 #screen-wrap {
@@ -59,7 +60,7 @@ canvas#screen {
   max-width: 480px;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 22px 14px;
+  padding: 6px 22px 10px;
   touch-action: none;
 }
 body.touch #controls { display: flex; }

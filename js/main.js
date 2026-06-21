@@ -174,16 +174,24 @@ const Game = {
     requestAnimationFrame(loop);
   }
 
-  // Pixel-perfektes Hochskalieren (ganzzahlig, wenn möglich)
+  // Hochskalieren: so groß wie möglich, aber pixel-perfekt auf dem *physischen*
+  // Display. Statt ganzzahlig in CSS-Pixeln (verschenkt auf High-DPI-Handys fast
+  // eine ganze Stufe) runden wir ganzzahlig in Geräte-Pixeln: jeder Spiel-Pixel
+  // belegt exakt N Hardware-Pixel -> scharf UND füllt den Rahmen.
   function resize() {
     const wrap = document.getElementById('screen-wrap');
     const availW = wrap.clientWidth, availH = wrap.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
     let scale = Math.min(availW / 160, availH / 144);
-    if (scale >= 1) scale = Math.floor(scale);
+    scale = Math.max(1, Math.floor(scale * dpr)) / dpr;   // ganze Hardware-Pixel
     canvas.style.width = (160 * scale) + 'px';
     canvas.style.height = (144 * scale) + 'px';
   }
   window.addEventListener('resize', resize);
+  // DPR kann sich ändern (Zoom, Monitorwechsel) -> Skalierung nachführen
+  if (window.matchMedia) {
+    try { window.matchMedia('(resolution: 1dppx)').addEventListener('change', resize); } catch (e) {}
+  }
 
   // Touch-Steuerung: Pointer-Events, kein Scroll/Zoom-Delay
   function bindTouch() {

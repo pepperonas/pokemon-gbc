@@ -3,3 +3,6 @@ assets/_compose.html
 server/node_modules/
 server/data/
 server/.env
+
+# Playwright MCP output
+.playwright-mcp/

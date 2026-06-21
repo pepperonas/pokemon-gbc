@@ -8,16 +8,37 @@
  */
 const UI = (() => {
 
-  const FONT = '8px "Press Start 2P", monospace';
+  const SCREEN_W = 160;
+  const FONT_FAMILY = '"Press Start 2P", monospace';
+  const FONT = '8px ' + FONT_FAMILY;
   const INK = '#181818';
   const PAPER = '#f8f8f8';
   const CREAM = '#f8f0d8';
 
-  function text(ctx, str, x, y, color = INK) {
+  /**
+   * Einzeiliger Text. Press Start 2P ist exakt 8px/Zeichen breit -> auf dem
+   * 160px-Display passen nur 20 Zeichen. Würde der String rechts über `right`
+   * hinauslaufen, wird die Schrift proportional verkleinert (bis 5px), sodass
+   * er garantiert vollständig sichtbar bleibt — kein Label wird je abgeschnitten.
+   */
+  function text(ctx, str, x, y, color = INK, right = SCREEN_W - 2) {
+    str = String(str);
     ctx.font = FONT;
+    const w = ctx.measureText(str).width;
+    if (w > 0 && x + w > right) {
+      const size = Math.max(5, Math.floor(8 * (right - x) / w));
+      ctx.font = size + 'px ' + FONT_FAMILY;
+    }
     ctx.textBaseline = 'top';
     ctx.fillStyle = color;
     ctx.fillText(str, x, y);
+  }
+
+  /** Einzeiliger Text horizontal zentriert (misst die echte Breite). */
+  function ctext(ctx, str, y, color = INK, cx = SCREEN_W / 2) {
+    ctx.font = FONT;
+    const w = ctx.measureText(String(str)).width;
+    text(ctx, str, Math.max(2, Math.round(cx - w / 2)), y, color);
   }
 
   /** Text mit Umbruch nach maxChars Zeichen (lange Wörter werden hart getrennt). */
@@ -291,7 +312,7 @@ const UI = (() => {
       text(ctx, 'BEUTEL', 8, 6);
       text(ctx, `$${Game.player.money || 0}`, 104, 6);
       const items = this.list();
-      if (!items.length) { text(ctx, 'Der Beutel ist leer.', 12, 64); }
+      if (!items.length) { ctext(ctx, 'Der Beutel ist leer.', 64); }
       const scroll = Math.max(0, Math.min(this.index - 4, items.length - 8));
       items.slice(scroll, scroll + 8).forEach((k, i) => {
         const gi = scroll + i, y = 22 + i * 13;
@@ -301,7 +322,7 @@ const UI = (() => {
       });
       if (this.pick) {
         box(ctx, 8, 8, 144, 100);
-        text(ctx, Data.ITEMS[this.pick.key].name + ' auf wen?', 16, 16);
+        text(ctx, Data.ITEMS[this.pick.key].name + ' auf wen?', 16, 16, INK, 148);
         Game.player.party.forEach((m, i) => {
           const y = 30 + i * 12;
           if (i === this.pick.index) text(ctx, '>', 18, y);
@@ -679,12 +700,19 @@ const UI = (() => {
       }
       spinBall(ctx, 80, 44, 13, this.t);
       const head = this.mode === 'host' ? 'WARTE AUF GEGNER' : this.mode === 'trade' ? 'SUCHE TAUSCH' : 'SUCHE GEGNER';
-      text(ctx, head + dots(this.t), 28, 72, '#f8f8f8');
+      // Mittig, mit reserviertem Platz für bis zu "..." (Punkte zappeln nicht)
+      ctx.font = FONT;
+      const hx = Math.max(2, Math.round((SCREEN_W - ctx.measureText(head + '...').width) / 2));
+      text(ctx, head + dots(this.t), hx, 72, '#f8f8f8');
       if (this.code) {
-        box(ctx, 40, 86, 80, 24);
-        text(ctx, 'CODE ' + this.code, 52, 94, '#f8d030');
+        const label = 'CODE ' + this.code;
+        ctx.font = FONT;
+        const bw = Math.min(152, ctx.measureText(label).width + 16);
+        const bx = Math.round((SCREEN_W - bw) / 2);
+        box(ctx, bx, 86, bw, 24);
+        text(ctx, label, bx + 8, 94, '#f8d030', bx + bw - 6);
       }
-      text(ctx, 'B: Abbrechen', 36, 124, '#68789a');
+      ctext(ctx, 'B: Abbrechen', 124, '#68789a');
     }
   }
 
@@ -1449,7 +1477,7 @@ const UI = (() => {
   }
 
   return {
-    text, textWrapped, box, hpBar, drawSilhouette, drawMonDetail,
+    text, ctext, textWrapped, box, hpBar, drawSilhouette, drawMonDetail,
     LoadingScreen, TitleScreen, StarterScreen, PauseMenuScreen,
     TeamScreen, BoxScreen, DexScreen, ItemScreen, MartScreen,
     OnlineScreen, OnlineSearchScreen, OnlineCodeScreen, OnlineBattleScreen, PvpTeamScreen,
