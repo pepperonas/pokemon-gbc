@@ -16,6 +16,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { gen1Types } = require('../js/battle-core.js');
 
 const COUNT = 151;
 const API = 'https://pokeapi.co/api/v2/pokemon/';
@@ -68,7 +69,7 @@ async function slim(j) {
   return {
     id: j.id,
     name: GERMAN_NAMES[j.id - 1] || j.name.toUpperCase(),
-    types: j.types.map(t => t.type.name),
+    types: gen1Types(j.types.map(t => t.type.name)),
     base: {
       hp:  stats['hp'],             atk: stats['attack'],
       def: stats['defense'],        spa: stats['special-attack'],

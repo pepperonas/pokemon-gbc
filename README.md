@@ -156,13 +156,31 @@ Stats nach Gen-1-Formel mit festen IVs (8), EXP-Kurve „Medium Fast" (Level³),
 - Stein-/Tausch-Evolutionen als Level-Evolutionen; Evoli-Zweig zufällig
 - Fix-Schaden-Attacken (Drachenwut, Nachtnebel) als normale Power-Moves
 
+## Tests
+
+Unit-Tests mit dem eingebauten Test-Runner von Node (22+), ohne zusätzliche Abhängigkeiten:
+
+```bash
+npm ci --prefix server          # einmalig: better-sqlite3 für die Datenschicht-Tests
+node --test test/*.test.js
+```
+
+| Datei | Prüft |
+|---|---|
+| `test/battle-core.test.js` | Typentabelle inkl. Gen-1-Eigenheiten, Schadensformel (STAB, Volltreffer, Verbrennung, Spezial), Fangchance, Evolutionen, Movesets, seedbare RNG (feste Folgen gepinnt) und den PvP-Rundenrechner (Determinismus, genau ein Sieger, Initiative, Wechsel, Gift, Status-Immunität) |
+| `test/data-integrity.test.js` | Pokédex (Client) und `server/species.json` (Server) stimmen überein, nur Gen-1-Typen, jeder Typ hat Beschriftung und Farbe |
+| `test/sync.test.js` | HTTP-API: Code-Format, Fortschritts-Schutz (409), globales Limit, Konto-Sitzung, CORS-Allowlist, Rate-Limit |
+| `test/db.test.js` | SQLite-Datenschicht: ELO, Rangliste, Speicherstände, Replay-Rotation (50), Sitzungsablauf |
+
+Der bestehende Ende-zu-Ende-Lauf (`node server/test-e2e.js`) bleibt daneben bestehen. GitHub Actions fährt die Unit-Tests bei jedem Push.
+
 ## Deployment
 
 ```bash
-rsync -avz --delete --exclude='.DS_Store' ./ root@<server>:/var/www/pokemon.celox.io/
+rsync -avz --delete --exclude='.DS_Store' --exclude='.git' --exclude='server' --exclude='tools' --exclude='test' ./ root@<server>:/var/www/pokemon.celox.io/
 ```
 
-Statisches Hosting genügt (Nginx/Apache/GitHub Pages) — es gibt kein Backend.
+Statisches Hosting genügt (Nginx/Apache/GitHub Pages); das optionale Backend für PvP und Cloud-Sync liegt unter `server/`.
 
 ## Lizenz
 

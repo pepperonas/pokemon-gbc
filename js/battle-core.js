@@ -42,6 +42,19 @@
   // In Gen 1 nutzen diese Typen den Spezial-Wert (hier: SpA vs. SpV)
   const SPECIAL = new Set(['fire', 'water', 'grass', 'electric', 'ice', 'psychic', 'dragon']);
 
+  /**
+   * Typen auf Gen 1 zurückführen. Die PokeAPI liefert die HEUTIGEN Typen
+   * (Fee seit Gen 6, Stahl seit Gen 2) — die kennt weder diese Tabelle noch
+   * der Move-Pool noch die Typ-Beschriftung. Unbekannte Typen fallen weg,
+   * bleibt nichts übrig, ist es Normal. Das trifft genau die Gen-1-Werte:
+   * Piepi/Pixi -> Normal, Pummeluff/Knuddeluff -> Normal,
+   * Magnetilo/Magneton -> Elektro, Pantimos -> Psycho.
+   */
+  function gen1Types(types) {
+    const kept = (types || []).filter(t => Object.prototype.hasOwnProperty.call(CHART, t));
+    return kept.length ? kept : ['normal'];
+  }
+
   function effectiveness(moveType, defTypes) {
     let m = 1;
     for (const t of defTypes) {
@@ -329,7 +342,7 @@
 
   return {
     CHART, SPECIAL, EVO, IV, MOVE_POOL,
-    effectiveness, calcStats, expFor, movesFor,
+    gen1Types, effectiveness, calcStats, expFor, movesFor,
     mulberry32, makeRng,
     damage, catchChance,
     makeBattleMon, makeBattleState, resolveTurn, applyForcedSwitch, effSpe,

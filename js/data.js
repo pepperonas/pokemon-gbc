@@ -93,7 +93,7 @@ const Data = (() => {
     return {
       id: j.id,
       name: GERMAN_NAMES[j.id - 1] || j.name.toUpperCase(),
-      types: j.types.map(t => t.type.name),
+      types: BattleCore.gen1Types(j.types.map(t => t.type.name)),
       base: {
         hp:  stats['hp'],             atk: stats['attack'],
         def: stats['defense'],        spa: stats['special-attack'],
