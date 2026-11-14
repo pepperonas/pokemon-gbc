@@ -15,4 +15,9 @@ jobs:
           cache: npm
           cache-dependency-path: server/package-lock.json
       - run: npm ci --prefix server
-      - run: node --test test/*.test.js
+      - name: Unit-Tests
+        shell: bash
+        run: |
+          node --test --test-reporter=tap test/*.test.js | tee test-output.txt
+          # Ohne passende Testdateien meldet node --test "0 Tests" und Erfolg.
+          grep -Eq '^# pass [1-9]' test-output.txt
